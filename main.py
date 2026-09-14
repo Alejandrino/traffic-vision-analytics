@@ -38,6 +38,9 @@ from camera_stream import CameraStream, create_all_streams
 from traffic_analyzer import TrafficAnalyzer, VehicleMetrics
 import camera_manager
 import database
+import novastar_controller
+import shelly_controller
+import campaign_manager
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN DE LOGGING
@@ -697,6 +700,142 @@ async def api_history_export_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINTS: GESTIÓN MULTI-UBICACIÓN, NOVASTAR TB40 Y SHELLY PRO
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/locations", summary="Listar ubicaciones y pantallas registradas")
+async def api_get_locations() -> JSONResponse:
+    """Devuelve todas las ubicaciones y la configuración de hardware de cada una."""
+    locs = database.get_locations()
+    return JSONResponse({"status": "ok", "locations": locs})
+
+
+class ShellyPowerRequest(BaseModel):
+    ip: str = "192.168.1.150"
+    turn_on: bool
+    channel: int = 0
+
+@app.get("/api/shelly/status", summary="Telemetría de consumo eléctrico Shelly Pro")
+async def api_shelly_status(ip: str = Query("192.168.1.150"), channel: int = Query(0)) -> JSONResponse:
+    """Retorna potencia (Watts), voltaje (V), corriente (A) y energía acumulada (kWh)."""
+    status = shelly_controller.get_status(ip=ip, channel=channel)
+    return JSONResponse({"status": "ok", "telemetry": status})
+
+@app.post("/api/shelly/power", summary="Encender o apagar relé Shelly Pro (Contactor de Pantalla)")
+async def api_shelly_power(req: ShellyPowerRequest) -> JSONResponse:
+    """Conmuta el suministro eléctrico principal de la pantalla LED."""
+    res = shelly_controller.set_power(ip=req.ip, turn_on=req.turn_on, channel=req.channel)
+    return JSONResponse({"status": "ok", "result": res})
+
+
+class NovastarPowerRequest(BaseModel):
+    ip: str = "192.168.1.140"
+    power_on: bool
+    port: int = 8001
+
+class NovastarBrightnessRequest(BaseModel):
+    ip: str = "192.168.1.140"
+    brightness: int
+    port: int = 8001
+
+@app.get("/api/novastar/status", summary="Estado del reproductor Novastar TB40")
+async def api_novastar_status(ip: str = Query("192.168.1.140"), port: int = Query(8001)) -> JSONResponse:
+    """Obtiene el estado de conexión, pantalla y brillo del TB40."""
+    status = novastar_controller.get_status(ip=ip, port=port)
+    return JSONResponse({"status": "ok", "status_info": status})
+
+@app.post("/api/novastar/power", summary="Encender o poner en Standby pantalla Novastar TB40")
+async def api_novastar_power(req: NovastarPowerRequest) -> JSONResponse:
+    """Activa o pone en pantalla negra la salida de video del procesador Novastar."""
+    res = novastar_controller.set_screen_power(ip=req.ip, power_on=req.power_on, port=req.port)
+    return JSONResponse({"status": "ok", "result": res})
+
+@app.post("/api/novastar/brightness", summary="Ajustar brillo de pantalla Novastar TB40 (0-100%)")
+async def api_novastar_brightness(req: NovastarBrightnessRequest) -> JSONResponse:
+    """Regula el nivel de brillo de la pantalla LED."""
+    res = novastar_controller.set_brightness(ip=req.ip, brightness=req.brightness, port=req.port)
+    return JSONResponse({"status": "ok", "result": res})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINTS: CAMPAÑAS PUBLICITARIAS Y CONSUMO ENERGÉTICO
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CampaignCreateRequest(BaseModel):
+    name: str
+    client: str
+    location_id: str
+    start_date: str
+    end_date: str
+    start_hour: int = 6
+    end_hour: int = 23
+    spot_seconds: int = 15
+    spots_per_hour: int = 12
+
+@app.get("/api/campaigns", summary="Listar campañas publicitarias")
+async def api_get_campaigns(location_id: str = Query("all")) -> JSONResponse:
+    """Retorna las campañas activas o filtradas por ubicación."""
+    campaigns = database.get_campaigns(location_id=location_id)
+    return JSONResponse({"status": "ok", "campaigns": campaigns})
+
+@app.post("/api/campaigns", summary="Crear nueva campaña publicitaria")
+async def api_create_campaign(req: CampaignCreateRequest) -> JSONResponse:
+    """Registra una pauta publicitaria para seguimiento de aforo y energía."""
+    cid = database.add_campaign(
+        name=req.name,
+        client=req.client,
+        location_id=req.location_id,
+        start_date=req.start_date,
+        end_date=req.end_date,
+        start_hour=req.start_hour,
+        end_hour=req.end_hour,
+        spot_seconds=req.spot_seconds,
+        spots_per_hour=req.spots_per_hour
+    )
+    return JSONResponse({"status": "ok", "campaign_id": cid, "message": "Campaña creada exitosamente."})
+
+@app.get("/api/campaigns/summary", summary="Resumen consolidado de aforo y energía por campaña")
+async def api_campaigns_summary(location_id: str = Query("all")) -> JSONResponse:
+    """Calcula aforo impactado, energía consumida (kWh) y costo monetario por campaña."""
+    data = campaign_manager.get_all_campaigns_summary(location_id=location_id)
+    return JSONResponse({"status": "ok", "data": data})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINTS: RECEPCIÓN DE REPORTES EDGE (NODOS REMOTOS NUC)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class EdgeSyncRequest(BaseModel):
+    node_id: str
+    location_id: str
+    date_reported: str
+    total_vehicles: int
+    total_in: int
+    total_out: int
+    peak_hour: str
+    raw_summary: str = ""
+
+@app.post("/api/edge/sync-report", summary="Recepción de reporte ligero desde nodo NUC local")
+async def api_edge_sync_report(req: EdgeSyncRequest) -> JSONResponse:
+    """
+    Permite que computadoras locales envíen únicamente su reporte estadístico consolidado
+    sin transferir video pesado a la nube, optimizando el ancho de banda y los costos.
+    """
+    rid = database.record_edge_sync(
+        node_id=req.node_id,
+        location_id=req.location_id,
+        date_reported=req.date_reported,
+        total_vehicles=req.total_vehicles,
+        total_in=req.total_in,
+        total_out=req.total_out,
+        peak_hour=req.peak_hour,
+        raw_summary=req.raw_summary
+    )
+    logger.info(f"[EDGE-SYNC] Reporte recibido de nodo '{req.node_id}' ({req.location_id}): {req.total_vehicles} veh.")
+    return JSONResponse({"status": "ok", "sync_id": rid, "message": "Reporte edge recibido y almacenado."})
 
 
 # ─────────────────────────────────────────────────────────────────────────────

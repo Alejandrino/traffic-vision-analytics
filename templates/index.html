@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sistema de Gestión y Aforo Vehicular — Plataforma de Movilidad</title>
-  <meta name="description" content="Plataforma corporativa de auditoría de tráfico vehicular, aforo multicámara y analítica histórica para toma de decisiones." />
+  <title>Sistema de Gestión y Aforo Vehicular — Plataforma de Movilidad y DOOH</title>
+  <meta name="description" content="Plataforma corporativa de auditoría de tráfico vehicular, aforo multicámara, control de pantallas Novastar TB40 y medición de energía Shelly Pro por campaña." />
   
   <!-- Tailwind CSS & Google Fonts -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -66,7 +66,7 @@
     @media print {
       body { background: #ffffff !important; color: #0f172a !important; }
       #app-nav, #sidebar-stream-controls, .no-print, button, .tab-btn { display: none !important; }
-      #tab-analytics, #tab-events { display: block !important; }
+      #tab-analytics, #tab-events, #tab-campaigns { display: block !important; }
       .print-only { display: block !important; }
       .card-box {
         background: #ffffff !important;
@@ -84,7 +84,7 @@
 <body class="h-full bg-brand-950 text-slate-100 flex flex-col antialiased overflow-hidden">
 
   <!-- ══ BARRA DE NAVEGACIÓN SUPERIOR (CORPORATIVA) ══════════════════════════ -->
-  <header class="no-print bg-brand-900 border-b border-brand-700/60 px-5 py-2.5 flex items-center justify-between shrink-0 z-30 shadow-sm">
+  <header class="no-print bg-brand-900 border-b border-brand-700/60 px-5 py-2 flex items-center justify-between shrink-0 z-30 shadow-sm flex-wrap gap-3">
     <div class="flex items-center gap-3">
       <!-- Icono de Movilidad y Aforo -->
       <div class="w-9 h-9 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-primary-light">
@@ -94,42 +94,63 @@
       </div>
       <div>
         <div class="flex items-center gap-2">
-          <h1 class="text-sm font-bold tracking-tight text-white uppercase">Control de Aforo y Tráfico Vehicular</h1>
-          <span class="text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded bg-blue-900/50 text-blue-300 border border-blue-700/50">Plataforma Empresarial</span>
+          <h1 class="text-sm font-bold tracking-tight text-white uppercase">Control de Aforo y Gestión de Pantallas DOOH</h1>
+          <span class="text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded bg-blue-900/50 text-blue-300 border border-blue-700/50">Multi-Ubicación</span>
         </div>
-        <p class="text-xs text-slate-400">Auditoría en tiempo real, registro de eventos y analítica de movilidad urbana</p>
+        <p class="text-xs text-slate-400">Auditoría vehicular, control Novastar TB40 y medición de energía Shelly Pro por campaña</p>
       </div>
+    </div>
+
+    <!-- Selector de Ubicación Global / Plaza -->
+    <div class="flex items-center gap-2 bg-brand-950 px-3 py-1.5 rounded-lg border border-brand-700/70">
+      <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      <label class="text-xs text-slate-400 font-medium">Plaza:</label>
+      <select id="global-location-select" onchange="onGlobalLocationChange()" class="bg-transparent text-xs text-blue-300 font-bold outline-none cursor-pointer">
+        <option value="all" class="bg-brand-900">Todas las Ubicaciones</option>
+      </select>
     </div>
 
     <!-- Pestañas Principales -->
     <nav class="flex items-center gap-1 bg-brand-950 p-1 rounded-lg border border-brand-700/50" id="app-nav">
       <button onclick="switchTab('live')" id="btn-tab-live"
-        class="nav-tab active px-3.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 text-slate-300 hover:text-white">
+        class="nav-tab active px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 text-slate-300 hover:text-white">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.82V15.18a1 1 0 01-1.447.89L15 14M3 8h12a2 2 0 012 2v4a2 2 0 01-2 2H3a2 2 0 01-2-2v-4a2 2 0 012-2z"/></svg>
-        Monitoreo en Vivo
+        Monitoreo
       </button>
 
       <button onclick="switchTab('analytics')" id="btn-tab-analytics"
-        class="nav-tab px-3.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 text-slate-400 hover:text-white">
+        class="nav-tab px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 text-slate-400 hover:text-white">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-        Métricas e Histórico
+        Métricas
+      </button>
+
+      <button onclick="switchTab('hardware')" id="btn-tab-hardware"
+        class="nav-tab px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 text-slate-400 hover:text-white">
+        <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        Pantalla & Shelly Pro
+      </button>
+
+      <button onclick="switchTab('campaigns')" id="btn-tab-campaigns"
+        class="nav-tab px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 text-slate-400 hover:text-white">
+        <svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+        Campañas & Energía
       </button>
 
       <button onclick="switchTab('events')" id="btn-tab-events"
-        class="nav-tab px-3.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 text-slate-400 hover:text-white">
+        class="nav-tab px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 text-slate-400 hover:text-white">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
-        Registro de Eventos
+        Eventos
       </button>
 
       <button onclick="switchTab('settings')" id="btn-tab-settings"
-        class="nav-tab px-3.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 text-slate-400 hover:text-white">
+        class="nav-tab px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 text-slate-400 hover:text-white">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
         Dispositivos
       </button>
     </nav>
 
     <!-- Estado de Conexión & Hora -->
-    <div class="flex items-center gap-4">
+    <div class="flex items-center gap-3">
       <div class="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded bg-brand-800 border border-brand-700 text-xs">
         <span id="conn-dot" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
         <span id="conn-text" class="text-slate-300 font-medium">Servicio Activo</span>
@@ -225,16 +246,6 @@
         </div>
       </div>
 
-      <!-- Membrete exclusivo para Reporte Impreso -->
-      <div class="print-only mb-6 border-b border-slate-300 pb-4">
-        <h1 class="text-2xl font-bold text-slate-900">INFORME EJECUTIVO DE AFORO VEHICULAR</h1>
-        <p class="text-sm text-slate-600">Reporte Oficial de Movilidad y Conteo de Vehículos</p>
-        <div class="mt-2 text-xs text-slate-500 flex justify-between">
-          <span>Fecha de Emisión: <span id="print-date"></span></span>
-          <span>Estado: Certificado por Auditoría Automática</span>
-        </div>
-      </div>
-
       <!-- Cuadrícula de KPIs Ejecutivos -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <!-- KPI 1: Volumen Total -->
@@ -300,7 +311,6 @@
 
       <!-- Fila de 2 Gráficos: Tendencia Diaria + Composición de Flota -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- Gráfico 2: Tendencia de Días Anteriores (2/3 de ancho) -->
         <div class="card-box lg:col-span-2 bg-brand-900/90 border border-brand-700/60 rounded-xl p-5 shadow-sm">
           <div class="flex items-center justify-between mb-4">
             <div>
@@ -318,7 +328,6 @@
           </div>
         </div>
 
-        <!-- Gráfico 3: Composición de Flota Vehicular (1/3 de ancho) -->
         <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-5 shadow-sm flex flex-col">
           <div>
             <h3 class="text-sm font-bold text-white">Composición de Flota</h3>
@@ -329,15 +338,243 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- ────────────────────────────────────────────────────────────────────────
+         PESTAÑA 3: CONTROL DE PANTALLA Y ENERGÍA (NOVASTAR TB40 & SHELLY PRO)
+    ──────────────────────────────────────────────────────────────────────── -->
+    <section id="tab-hardware" class="h-full hidden flex-col overflow-y-auto p-6 space-y-6 bg-brand-950">
+      
+      <div class="pb-4 border-b border-brand-700/60 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+            <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            Control de Pantalla y Monitoreo Eléctrico (Shelly Pro + Novastar TB40)
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">Gestión de alimentación eléctrica del contactor principal, telemetría de energía en vivo y control de salida de video.</p>
+        </div>
+        <button onclick="refreshHardwareTelemetry()" class="px-3.5 py-1.5 rounded-lg bg-brand-850 hover:bg-brand-800 border border-brand-700 text-xs font-medium text-slate-200 flex items-center gap-1.5 transition">
+          <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          Actualizar Telemetría
+        </button>
+      </div>
+
+      <!-- Tarjetas de Telemetría Eléctrica en Tiempo Real (Shelly Pro) -->
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-bold text-white flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+            Telemetría Eléctrica en Vivo — Shelly Pro
+          </h3>
+          <span class="text-xs text-slate-400" id="shelly-device-label">Dispositivo: 192.168.1.150 (Relé 0)</span>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <!-- Potencia -->
+          <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-4 shadow-sm">
+            <div class="text-xs text-slate-400 font-medium mb-1 flex justify-between">
+              <span>Potencia Activa</span>
+              <span class="text-[10px] uppercase font-bold text-amber-400">Carga Actual</span>
+            </div>
+            <div class="text-2xl font-black text-white flex items-baseline gap-1.5">
+              <span id="shelly-power-w">0.0</span>
+              <span class="text-sm font-bold text-slate-400">Watts</span>
+            </div>
+            <div class="mt-2 text-xs text-slate-400 font-mono" id="shelly-power-kw">0.00 kW</div>
+          </div>
+
+          <!-- Voltaje -->
+          <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-4 shadow-sm">
+            <div class="text-xs text-slate-400 font-medium mb-1">Voltaje de Línea</div>
+            <div class="text-2xl font-black text-white flex items-baseline gap-1.5">
+              <span id="shelly-voltage">0.0</span>
+              <span class="text-sm font-bold text-slate-400">Volts (AC)</span>
+            </div>
+            <div class="mt-2 text-xs text-emerald-400">Línea Estable (220V ±5%)</div>
+          </div>
+
+          <!-- Corriente -->
+          <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-4 shadow-sm">
+            <div class="text-xs text-slate-400 font-medium mb-1">Corriente Eléctrica</div>
+            <div class="text-2xl font-black text-white flex items-baseline gap-1.5">
+              <span id="shelly-current">0.0</span>
+              <span class="text-sm font-bold text-slate-400">Amperes</span>
+            </div>
+            <div class="mt-2 text-xs text-slate-400">Amperaje total de módulos LED</div>
+          </div>
+
+          <!-- Energía Acumulada -->
+          <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-4 shadow-sm">
+            <div class="text-xs text-slate-400 font-medium mb-1">Energía Consumida Total</div>
+            <div class="text-2xl font-black text-emerald-400 flex items-baseline gap-1.5">
+              <span id="shelly-total-kwh">0.00</span>
+              <span class="text-sm font-bold text-emerald-500">kWh</span>
+            </div>
+            <div class="mt-2 text-xs text-slate-400">Medición certificada para pauta</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fila de Controles: Interruptor Shelly Pro & Procesador Novastar TB40 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        <!-- Tarjeta de Control Eléctrico Shelly Pro -->
+        <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-5 shadow-sm flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h3 class="text-sm font-bold text-white">Contactor Eléctrico Principal</h3>
+                <p class="text-xs text-slate-400">Alimentación de alto voltaje de los módulos LED mediante Shelly Pro.</p>
+              </div>
+              <span id="shelly-power-status-badge" class="px-2.5 py-1 rounded text-xs font-bold bg-emerald-900/50 text-emerald-400 border border-emerald-700/50">
+                ENCENDIDA (ON)
+              </span>
+            </div>
+
+            <div class="p-3 bg-brand-950 rounded-lg border border-brand-700/40 text-xs text-slate-300 space-y-1.5 mb-6">
+              <div class="flex justify-between">
+                <span class="text-slate-500">IP Shelly Pro:</span>
+                <span id="label-shelly-ip" class="font-mono text-white">192.168.1.150</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-500">Canal de Relé:</span>
+                <span class="font-mono text-white">Relay 0 (Contactor General)</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-500">Temperatura del Módulo:</span>
+                <span id="shelly-temp" class="font-mono text-emerald-400">38.0 °C</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Botones de Acción Shelly -->
+          <div class="flex gap-3">
+            <button onclick="toggleShellyPower(true)"
+              class="flex-1 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-sm flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              Encender Pantalla
+            </button>
+            <button onclick="toggleShellyPower(false)"
+              class="flex-1 py-2.5 rounded-lg bg-rose-700 hover:bg-rose-600 text-white font-semibold text-xs transition shadow-sm flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+              Apagar Pantalla
+            </button>
+          </div>
+        </div>
+
+        <!-- Tarjeta de Control Novastar TB40 -->
+        <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-5 shadow-sm flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h3 class="text-sm font-bold text-white">Reproductor Novastar Taurus TB40</h3>
+                <p class="text-xs text-slate-400">Control de salida de señal de video y ajuste de nivel de brillo.</p>
+              </div>
+              <span id="novastar-status-badge" class="px-2.5 py-1 rounded text-xs font-bold bg-blue-900/50 text-blue-300 border border-blue-700/50">
+                SALIDA ACTIVA
+              </span>
+            </div>
+
+            <!-- Control de Brillo -->
+            <div class="p-3.5 bg-brand-950 rounded-lg border border-brand-700/40 space-y-3 mb-6">
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-slate-300 font-medium">Nivel de Brillo de Pantalla:</span>
+                <span id="novastar-brightness-val" class="font-bold text-white bg-blue-600/30 px-2 py-0.5 rounded border border-blue-500/40">75%</span>
+              </div>
+              <input type="range" id="novastar-brightness-slider" min="0" max="100" value="75" oninput="updateBrightnessLabel(this.value)"
+                class="w-full accent-blue-500 cursor-pointer" />
+              <div class="flex justify-between text-[11px] text-slate-500">
+                <span>0% (Standby)</span>
+                <span>50% (Nublado/Noche)</span>
+                <span>100% (Luz solar directa)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Acciones Novastar -->
+          <div class="flex gap-3">
+            <button onclick="applyNovastarBrightness()"
+              class="flex-1 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition shadow-sm">
+              Aplicar Brillo
+            </button>
+            <button onclick="toggleNovastarBlackout()" id="btn-novastar-blackout"
+              class="flex-1 py-2.5 rounded-lg bg-brand-800 hover:bg-brand-750 border border-brand-700 text-slate-200 font-semibold text-xs transition shadow-sm">
+              Pantalla Negra (Blackout)
+            </button>
+          </div>
+        </div>
+
+      </div>
 
     </section>
 
     <!-- ────────────────────────────────────────────────────────────────────────
-         PESTAÑA 3: REGISTRO COMPLETO DE EVENTOS (BITÁCORA PARA AUDITORÍA)
+         PESTAÑA 4: CAMPAÑAS PUBLICITARIAS Y CONSUMO ENERGÉTICO (DOOH)
+    ──────────────────────────────────────────────────────────────────────── -->
+    <section id="tab-campaigns" class="h-full hidden flex-col overflow-y-auto p-6 space-y-6 bg-brand-950">
+      
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-brand-700/60">
+        <div>
+          <h2 class="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+            <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+            Auditoría de Aforo y Consumo Eléctrico por Campaña Publicitaria
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">Control financiero del consumo eléctrico en kWh y reporte de vehículos expuestos a cada pauta publicitaria.</p>
+        </div>
+
+        <div class="flex items-center gap-2 no-print">
+          <button onclick="openNewCampaignModal()"
+            class="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white flex items-center gap-1.5 shadow-sm transition">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Nueva Campaña
+          </button>
+          <button onclick="window.print()"
+            class="px-3.5 py-1.5 rounded-lg bg-brand-800 hover:bg-brand-700 border border-brand-600 text-xs font-semibold text-slate-200 flex items-center gap-1.5 shadow-sm transition">
+            <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+            Imprimir Informe de Campañas PDF
+          </button>
+        </div>
+      </div>
+
+      <!-- Cuadrícula de Tarjetas de Campañas -->
+      <div id="campaigns-cards-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <!-- Generado dinámicamente por JavaScript -->
+      </div>
+
+      <!-- Tabla Comparativa de Campañas -->
+      <div class="card-box bg-brand-900 border border-brand-700/60 rounded-xl overflow-hidden shadow-sm">
+        <div class="px-5 py-3.5 bg-brand-850 border-b border-brand-700/60 flex items-center justify-between">
+          <h3 class="text-sm font-bold text-white">Matriz Detallada de Costo Eléctrico e Impacto Vehicular</h3>
+          <span class="text-xs text-slate-400">Tarifa CFE Promedio: $3.85 / kWh</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead class="bg-brand-900 text-slate-400 border-b border-brand-700/60 uppercase tracking-wider text-[11px]">
+              <tr>
+                <th class="py-2.5 px-4 font-semibold">Campaña & Cliente</th>
+                <th class="py-2.5 px-4 font-semibold">Ubicación / Pantalla</th>
+                <th class="py-2.5 px-4 font-semibold">Horario Diario</th>
+                <th class="py-2.5 px-4 font-semibold">Spots Emitidos</th>
+                <th class="py-2.5 px-4 font-semibold text-emerald-400">Aforo Vehicular (Impactos)</th>
+                <th class="py-2.5 px-4 font-semibold text-amber-400">Energía (kWh)</th>
+                <th class="py-2.5 px-4 font-semibold text-white">Costo Eléctrico ($ MXN)</th>
+                <th class="py-2.5 px-4 font-semibold">CPM Energía</th>
+              </tr>
+            </thead>
+            <tbody id="campaigns-table-body" class="divide-y divide-brand-700/40 text-slate-300">
+              <tr><td colspan="8" class="text-center py-6 text-slate-500">Cargando campañas...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────────────────────────────
+         PESTAÑA 5: REGISTRO COMPLETO DE EVENTOS (BITÁCORA)
     ──────────────────────────────────────────────────────────────────────── -->
     <section id="tab-events" class="h-full hidden flex-col overflow-hidden p-6 bg-brand-950">
       
-      <!-- Barra de Filtros y Acciones de Exportación -->
       <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-brand-700/60">
         <div>
           <h2 class="text-lg font-bold text-white tracking-tight flex items-center gap-2">
@@ -348,14 +585,11 @@
         </div>
 
         <div class="flex items-center gap-2 no-print">
-          <!-- Botón Exportar CSV -->
           <button onclick="exportCSV()"
             class="px-3.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold text-white flex items-center gap-1.5 shadow-sm transition">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
             Exportar CSV (Excel)
           </button>
-
-          <!-- Botón Imprimir Reporte Formal -->
           <button onclick="window.print()"
             class="px-3.5 py-1.5 rounded-lg bg-brand-800 hover:bg-brand-700 border border-brand-600 text-xs font-semibold text-slate-200 flex items-center gap-1.5 shadow-sm transition">
             <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
@@ -430,7 +664,7 @@
     </section>
 
     <!-- ────────────────────────────────────────────────────────────────────────
-         PESTAÑA 4: GESTIÓN DE DISPOSITIVOS Y LÍNEAS DE AFORO
+         PESTAÑA 6: GESTIÓN DE DISPOSITIVOS Y LÍNEAS DE AFORO
     ──────────────────────────────────────────────────────────────────────── -->
     <section id="tab-settings" class="h-full hidden flex-col overflow-y-auto p-6 space-y-6 bg-brand-950">
       <div class="pb-4 border-b border-brand-700/60">
@@ -476,10 +710,64 @@
 
   </main>
 
+  <!-- ══ MODAL DE NUEVA CAMPAÑA ═══════════════════════════════════════════════ -->
+  <div id="modal-campaign" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-brand-900 border border-brand-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-brand-700/60 pb-3">
+        <h3 class="text-base font-bold text-white">Registrar Nueva Campaña Publicitaria</h3>
+        <button onclick="closeNewCampaignModal()" class="text-slate-400 hover:text-white">✕</button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-400 mb-1">Nombre de la Campaña:</label>
+          <input type="text" id="camp-name" placeholder="ej. Campaña Verano 2026" class="w-full bg-brand-950 border border-brand-700 rounded px-3 py-2 text-white outline-none focus:border-blue-500" />
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1">Cliente / Anunciante:</label>
+          <input type="text" id="camp-client" placeholder="ej. Cervecería Cuauhtémoc Moctezuma" class="w-full bg-brand-950 border border-brand-700 rounded px-3 py-2 text-white outline-none focus:border-blue-500" />
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1">Ubicación / Pantalla Asignada:</label>
+          <select id="camp-location" class="w-full bg-brand-950 border border-brand-700 rounded px-3 py-2 text-white outline-none focus:border-blue-500">
+            <!-- Cargado dinámicamente -->
+          </select>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1">Fecha Inicio:</label>
+            <input type="date" id="camp-start-date" class="w-full bg-brand-950 border border-brand-700 rounded px-3 py-2 text-white outline-none" />
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1">Fecha Fin:</label>
+            <input type="date" id="camp-end-date" class="w-full bg-brand-950 border border-brand-700 rounded px-3 py-2 text-white outline-none" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1">Duración de Spot (segundos):</label>
+            <input type="number" id="camp-spot-sec" value="15" min="5" max="60" class="w-full bg-brand-950 border border-brand-700 rounded px-3 py-2 text-white outline-none" />
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1">Spots por Hora:</label>
+            <input type="number" id="camp-spots-hr" value="12" min="1" max="60" class="w-full bg-brand-950 border border-brand-700 rounded px-3 py-2 text-white outline-none" />
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-3 pt-3 border-t border-brand-700/60">
+        <button onclick="closeNewCampaignModal()" class="px-4 py-2 rounded-lg bg-brand-800 hover:bg-brand-750 text-xs font-medium text-slate-300">Cancelar</button>
+        <button onclick="submitNewCampaign()" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-sm">Guardar y Activar Campaña</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ══ JAVASCRIPT DEL SISTEMA ═══════════════════════════════════════════════ -->
   <script>
     // Variables de Estado
     let currentTab = 'live';
+    let locations = [];
+    let selectedLocation = 'all';
     let cameras = {};
     let metrics = {};
     let ws = null;
@@ -487,6 +775,7 @@
     let eventsOffset = 0;
     const eventsLimit = 50;
     let totalEvents = 0;
+    let novastarPowerState = true;
 
     // Instancias de Chart.js
     let chartHourly = null;
@@ -499,33 +788,345 @@
       const timeStr = now.toLocaleTimeString('es-MX', { hour12: false });
       const el = document.getElementById('live-clock');
       if (el) el.textContent = timeStr;
-      const printDateEl = document.getElementById('print-date');
-      if (printDateEl) printDateEl.textContent = now.toLocaleDateString('es-MX') + ' ' + timeStr;
     }, 1000);
 
     // ── NAVEGACIÓN POR PESTAÑAS ─────────────────────────────────────────────
     function switchTab(tab) {
       currentTab = tab;
-      ['live', 'analytics', 'events', 'settings'].forEach(t => {
+      ['live', 'analytics', 'hardware', 'campaigns', 'events', 'settings'].forEach(t => {
         const sec = document.getElementById(`tab-${t}`);
         const btn = document.getElementById(`btn-tab-${t}`);
-        if (t === tab) {
-          sec.classList.remove('hidden');
-          sec.classList.add('flex');
-          btn.classList.add('active');
-        } else {
-          sec.classList.add('hidden');
-          sec.classList.remove('flex');
-          btn.classList.remove('active');
+        if (sec && btn) {
+          if (t === tab) {
+            sec.classList.remove('hidden');
+            sec.classList.add('flex');
+            btn.classList.add('active');
+          } else {
+            sec.classList.add('hidden');
+            sec.classList.remove('flex');
+            btn.classList.remove('active');
+          }
         }
       });
 
       if (tab === 'analytics') {
         loadAnalyticsData();
+      } else if (tab === 'hardware') {
+        refreshHardwareTelemetry();
+      } else if (tab === 'campaigns') {
+        loadCampaignsData();
       } else if (tab === 'events') {
         loadEvents(0);
       } else if (tab === 'settings') {
         scanDevices();
+      }
+    }
+
+    // ── MULTI-UBICACIÓN ─────────────────────────────────────────────────────
+    async function loadLocations() {
+      try {
+        const res = await fetch('/api/locations');
+        const data = await res.json();
+        locations = data.locations || [];
+        
+        const sel = document.getElementById('global-location-select');
+        const modalSel = document.getElementById('camp-location');
+        if (sel) {
+          sel.innerHTML = '<option value="all" class="bg-brand-900">Todas las Ubicaciones</option>';
+          locations.forEach(loc => {
+            const opt = document.createElement('option');
+            opt.value = loc.id;
+            opt.textContent = loc.name;
+            opt.className = 'bg-brand-900';
+            sel.appendChild(opt);
+          });
+        }
+        if (modalSel) {
+          modalSel.innerHTML = '';
+          locations.forEach(loc => {
+            const opt = document.createElement('option');
+            opt.value = loc.id;
+            opt.textContent = `${loc.name} (${loc.cost_per_kwh} $/kWh)`;
+            modalSel.appendChild(opt);
+          });
+        }
+      } catch (e) {
+        console.error("Error cargando ubicaciones:", e);
+      }
+    }
+
+    function onGlobalLocationChange() {
+      selectedLocation = document.getElementById('global-location-select').value;
+      if (currentTab === 'analytics') loadAnalyticsData();
+      if (currentTab === 'hardware') refreshHardwareTelemetry();
+      if (currentTab === 'campaigns') loadCampaignsData();
+      if (currentTab === 'events') loadEvents(0);
+    }
+
+    // ── HARDWARE: SHELLY PRO & NOVASTAR TB40 ─────────────────────────────────
+    async function refreshHardwareTelemetry() {
+      // Buscar configuración de ubicación seleccionada
+      let shellyIp = '192.168.1.150';
+      let novastarIp = '192.168.1.140';
+      const loc = locations.find(l => l.id === selectedLocation);
+      if (loc) {
+        shellyIp = loc.shelly_ip || shellyIp;
+        novastarIp = loc.novastar_ip || novastarIp;
+      }
+
+      document.getElementById('shelly-device-label').textContent = `Dispositivo: ${shellyIp} (Relé 0)`;
+      document.getElementById('label-shelly-ip').textContent = shellyIp;
+
+      // 1. Obtener telemetría de Shelly Pro
+      try {
+        const res = await fetch(`/api/shelly/status?ip=${shellyIp}`);
+        const data = await res.json();
+        const tel = data.telemetry || {};
+
+        document.getElementById('shelly-power-w').textContent = (tel.power_w || 0.0).toLocaleString();
+        document.getElementById('shelly-power-kw').textContent = `${((tel.power_w || 0) / 1000.0).toFixed(2)} kW`;
+        document.getElementById('shelly-voltage').textContent = tel.voltage || 220.0;
+        document.getElementById('shelly-current').textContent = tel.current || 0.0;
+        document.getElementById('shelly-total-kwh').textContent = (tel.total_kwh || 0.0).toFixed(2);
+        document.getElementById('shelly-temp').textContent = `${tel.temperature_c || 38.0} °C`;
+
+        const badge = document.getElementById('shelly-power-status-badge');
+        if (tel.is_on) {
+          badge.textContent = "ENCENDIDA (ON)";
+          badge.className = "px-2.5 py-1 rounded text-xs font-bold bg-emerald-900/50 text-emerald-400 border border-emerald-700/50";
+        } else {
+          badge.textContent = "APAGADA (STANDBY)";
+          badge.className = "px-2.5 py-1 rounded text-xs font-bold bg-rose-900/50 text-rose-400 border border-rose-700/50";
+        }
+      } catch (e) {
+        console.error("Error consultando Shelly:", e);
+      }
+
+      // 2. Obtener estado de Novastar TB40
+      try {
+        const res = await fetch(`/api/novastar/status?ip=${novastarIp}`);
+        const data = await res.json();
+        const info = data.status_info || {};
+
+        novastarPowerState = info.screen_power !== false;
+        const b = info.brightness || 75;
+        document.getElementById('novastar-brightness-slider').value = b;
+        document.getElementById('novastar-brightness-val').textContent = `${b}%`;
+
+        const badge = document.getElementById('novastar-status-badge');
+        const btnBlackout = document.getElementById('btn-novastar-blackout');
+        if (novastarPowerState) {
+          badge.textContent = "SALIDA ACTIVA";
+          badge.className = "px-2.5 py-1 rounded text-xs font-bold bg-blue-900/50 text-blue-300 border border-blue-700/50";
+          btnBlackout.textContent = "Pantalla Negra (Blackout)";
+        } else {
+          badge.textContent = "BLACKOUT / STANDBY";
+          badge.className = "px-2.5 py-1 rounded text-xs font-bold bg-amber-900/50 text-amber-400 border border-amber-700/50";
+          btnBlackout.textContent = "Reanudar Salida";
+        }
+      } catch (e) {
+        console.error("Error consultando Novastar:", e);
+      }
+    }
+
+    async function toggleShellyPower(turnOn) {
+      const actionStr = turnOn ? "ENCENDER" : "APAGAR";
+      if (!confirm(`¿Confirmas que deseas ${actionStr} la alimentación eléctrica de la pantalla LED?`)) return;
+
+      let shellyIp = '192.168.1.150';
+      const loc = locations.find(l => l.id === selectedLocation);
+      if (loc) shellyIp = loc.shelly_ip || shellyIp;
+
+      try {
+        const res = await fetch('/api/shelly/power', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip: shellyIp, turn_on: turnOn, channel: 0 })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert(`Comando de ${actionStr} enviado exitosamente.`);
+          refreshHardwareTelemetry();
+        }
+      } catch (e) {
+        alert("Error comunicando con el relé Shelly Pro.");
+      }
+    }
+
+    function updateBrightnessLabel(val) {
+      document.getElementById('novastar-brightness-val').textContent = `${val}%`;
+    }
+
+    async function applyNovastarBrightness() {
+      const b = parseInt(document.getElementById('novastar-brightness-slider').value, 10);
+      let novastarIp = '192.168.1.140';
+      const loc = locations.find(l => l.id === selectedLocation);
+      if (loc) novastarIp = loc.novastar_ip || novastarIp;
+
+      try {
+        const res = await fetch('/api/novastar/brightness', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip: novastarIp, brightness: b })
+        });
+        if (res.ok) {
+          alert(`Brillo de la pantalla Novastar ajustado al ${b}%.`);
+        }
+      } catch (e) {
+        alert("Error ajustando brillo del reproductor Novastar.");
+      }
+    }
+
+    async function toggleNovastarBlackout() {
+      let novastarIp = '192.168.1.140';
+      const loc = locations.find(l => l.id === selectedLocation);
+      if (loc) novastarIp = loc.novastar_ip || novastarIp;
+
+      const newState = !novastarPowerState;
+      try {
+        const res = await fetch('/api/novastar/power', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip: novastarIp, power_on: newState })
+        });
+        if (res.ok) {
+          novastarPowerState = newState;
+          refreshHardwareTelemetry();
+        }
+      } catch (e) {
+        alert("Error conmutando salida de video de Novastar.");
+      }
+    }
+
+    // ── CAMPAÑAS PUBLICITARIAS Y CONSUMO ENERGÉTICO ─────────────────────────
+    async function loadCampaignsData() {
+      try {
+        const res = await fetch(`/api/campaigns/summary?location_id=${selectedLocation}`);
+        const data = await res.json();
+        const campaigns = data.data || [];
+        renderCampaignsCards(campaigns);
+        renderCampaignsTable(campaigns);
+      } catch (e) {
+        console.error("Error cargando campañas:", e);
+      }
+    }
+
+    function renderCampaignsCards(campaigns) {
+      const container = document.getElementById('campaigns-cards-grid');
+      if (!container) return;
+
+      container.innerHTML = campaigns.map(c => `
+        <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-5 shadow-sm flex flex-col justify-between space-y-4">
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-purple-950/70 text-purple-400 border border-purple-800/50">
+                ${c.client}
+              </span>
+              <span class="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> ${c.status}
+              </span>
+            </div>
+            <h4 class="text-sm font-bold text-white tracking-tight">${c.name}</h4>
+            <p class="text-xs text-slate-400 mt-1">${c.location_name}</p>
+          </div>
+
+          <!-- Métricas Clave de la Campaña -->
+          <div class="grid grid-cols-2 gap-2 p-3 bg-brand-950 rounded-lg border border-brand-700/40 text-xs">
+            <div>
+              <span class="text-[10px] text-slate-500 uppercase block">Aforo Vehicular</span>
+              <span class="text-base font-extrabold text-emerald-400">${c.vehicles_exposed.toLocaleString()}</span>
+              <span class="text-[10px] text-slate-400 block">impactos auditados</span>
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-500 uppercase block">Consumo Pantalla</span>
+              <span class="text-base font-extrabold text-amber-400">${c.energy_kwh.toLocaleString()}</span>
+              <span class="text-[10px] text-slate-400 block">kWh consumidos</span>
+            </div>
+          </div>
+
+          <div class="pt-2 border-t border-brand-700/40 flex items-center justify-between text-xs">
+            <div>
+              <span class="text-slate-400">Costo Eléctrico:</span>
+              <span class="font-bold text-white ml-1">$${c.energy_cost_mxn.toLocaleString()} MXN</span>
+            </div>
+            <span class="text-[11px] text-slate-500 font-mono">CPM: $${c.cpm_energy_mxn}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderCampaignsTable(campaigns) {
+      const tbody = document.getElementById('campaigns-table-body');
+      if (!tbody) return;
+
+      if (campaigns.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-6 text-slate-500">No hay campañas registradas para esta ubicación.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = campaigns.map(c => `
+        <tr class="hover:bg-brand-850/60 transition">
+          <td class="py-2.5 px-4">
+            <div class="font-bold text-white">${c.name}</div>
+            <div class="text-[11px] text-purple-400">${c.client}</div>
+          </td>
+          <td class="py-2.5 px-4 font-medium text-slate-300">${c.location_name}</td>
+          <td class="py-2.5 px-4 text-slate-400">${c.daily_schedule}</td>
+          <td class="py-2.5 px-4 font-mono text-slate-300">${c.total_spots_aired.toLocaleString()} spots (${c.screen_time_hours}h)</td>
+          <td class="py-2.5 px-4 font-bold text-emerald-400">${c.vehicles_exposed.toLocaleString()}</td>
+          <td class="py-2.5 px-4 font-bold text-amber-400">${c.energy_kwh.toLocaleString()} kWh</td>
+          <td class="py-2.5 px-4 font-extrabold text-white">$${c.energy_cost_mxn.toLocaleString()}</td>
+          <td class="py-2.5 px-4 font-mono text-slate-400">$${c.cpm_energy_mxn}</td>
+        </tr>
+      `).join('');
+    }
+
+    function openNewCampaignModal() {
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('camp-start-date').value = today;
+      document.getElementById('camp-end-date').value = today;
+      document.getElementById('modal-campaign').classList.remove('hidden');
+    }
+
+    function closeNewCampaignModal() {
+      document.getElementById('modal-campaign').classList.add('hidden');
+    }
+
+    async function submitNewCampaign() {
+      const name = document.getElementById('camp-name').value.trim();
+      const client = document.getElementById('camp-client').value.trim();
+      const locId = document.getElementById('camp-location').value;
+      const startD = document.getElementById('camp-start-date').value;
+      const endD = document.getElementById('camp-end-date').value;
+      const spotSec = parseInt(document.getElementById('camp-spot-sec').value, 10);
+      const spotsHr = parseInt(document.getElementById('camp-spots-hr').value, 10);
+
+      if (!name || !client) {
+        alert("Por favor introduce el nombre de la campaña y el cliente.");
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/campaigns', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name,
+            client: client,
+            location_id: locId,
+            start_date: startD,
+            end_date: endD,
+            spot_seconds: spotSec,
+            spots_per_hour: spotsHr
+          })
+        });
+        if (res.ok) {
+          alert("Campaña publicitaria registrada exitosamente.");
+          closeNewCampaignModal();
+          loadCampaignsData();
+        }
+      } catch (e) {
+        alert("Error registrando la campaña.");
       }
     }
 
@@ -568,7 +1169,6 @@
         totalOut += (m.total_out || 0);
         activeTracks += (m.active_tracks || 0);
 
-        // Actualizar tarjeta del stream si existe
         const inEl = document.getElementById(`cam-${camId}-in`);
         const outEl = document.getElementById(`cam-${camId}-out`);
         const fpsEl = document.getElementById(`cam-${camId}-fps`);
@@ -686,22 +1286,18 @@
       const days = document.getElementById('filter-days-span').value || 7;
 
       try {
-        // Cargar Resumen de KPIs
         const resKpi = await fetch(`/api/history/summary?camera_id=${cam}&date=${date}`);
         const dataKpi = (await resKpi.json()).data;
         renderKPIs(dataKpi);
 
-        // Cargar Aforo Horario (00:00 - 23:00)
         const resHourly = await fetch(`/api/history/hourly?camera_id=${cam}&date=${date}`);
         const dataHourly = (await resHourly.json()).data;
         renderHourlyChart(dataHourly);
 
-        // Cargar Tendencia Diaria
         const resDaily = await fetch(`/api/history/daily?camera_id=${cam}&days=${days}`);
         const dataDaily = (await resDaily.json()).data;
         renderDailyChart(dataDaily);
 
-        // Renderizar Dona de Composición
         renderPieChart(dataKpi.vehicle_classes || {});
       } catch (e) {
         console.error("Error cargando datos analíticos:", e);
@@ -715,7 +1311,6 @@
       document.getElementById('stat-peak-hour').textContent = kpi.peak_hour || '--:--';
       document.getElementById('stat-avg-dwell').textContent = `${kpi.avg_dwell_seconds} s`;
 
-      // Calcular proporción de transporte pesado
       let heavy = 0;
       let total = kpi.total_flow || 1;
       if (kpi.vehicle_classes) {
@@ -740,18 +1335,8 @@
         data: {
           labels: labels,
           datasets: [
-            {
-              label: 'Entradas (IN)',
-              data: dataIn,
-              backgroundColor: '#10b981',
-              borderRadius: 4,
-            },
-            {
-              label: 'Salidas (OUT)',
-              data: dataOut,
-              backgroundColor: '#f59e0b',
-              borderRadius: 4,
-            }
+            { label: 'Entradas (IN)', data: dataIn, backgroundColor: '#10b981', borderRadius: 4 },
+            { label: 'Salidas (OUT)', data: dataOut, backgroundColor: '#f59e0b', borderRadius: 4 }
           ]
         },
         options: {
@@ -759,24 +1344,11 @@
           maintainAspectRatio: false,
           plugins: {
             legend: { display: false },
-            tooltip: {
-              backgroundColor: '#1e293b',
-              titleColor: '#ffffff',
-              bodyColor: '#cbd5e1',
-              borderColor: '#475569',
-              borderWidth: 1,
-            }
+            tooltip: { backgroundColor: '#1e293b', titleColor: '#ffffff', bodyColor: '#cbd5e1', borderColor: '#475569', borderWidth: 1 }
           },
           scales: {
-            x: {
-              grid: { color: 'rgba(51, 65, 85, 0.4)' },
-              ticks: { color: '#94a3b8', font: { size: 10 } }
-            },
-            y: {
-              grid: { color: 'rgba(51, 65, 85, 0.4)' },
-              ticks: { color: '#94a3b8', font: { size: 10 } },
-              beginAtZero: true
-            }
+            x: { grid: { color: 'rgba(51, 65, 85, 0.4)' }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+            y: { grid: { color: 'rgba(51, 65, 85, 0.4)' }, ticks: { color: '#94a3b8', font: { size: 10 } }, beginAtZero: true }
           }
         }
       });
@@ -809,24 +1381,11 @@
           maintainAspectRatio: false,
           plugins: {
             legend: { display: false },
-            tooltip: {
-              backgroundColor: '#1e293b',
-              titleColor: '#ffffff',
-              bodyColor: '#cbd5e1',
-              borderColor: '#475569',
-              borderWidth: 1,
-            }
+            tooltip: { backgroundColor: '#1e293b', titleColor: '#ffffff', bodyColor: '#cbd5e1', borderColor: '#475569', borderWidth: 1 }
           },
           scales: {
-            x: {
-              grid: { color: 'rgba(51, 65, 85, 0.4)' },
-              ticks: { color: '#94a3b8', font: { size: 10 } }
-            },
-            y: {
-              grid: { color: 'rgba(51, 65, 85, 0.4)' },
-              ticks: { color: '#94a3b8', font: { size: 10 } },
-              beginAtZero: true
-            }
+            x: { grid: { color: 'rgba(51, 65, 85, 0.4)' }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+            y: { grid: { color: 'rgba(51, 65, 85, 0.4)' }, ticks: { color: '#94a3b8', font: { size: 10 } }, beginAtZero: true }
           }
         }
       });
@@ -850,14 +1409,7 @@
           labels: labels,
           datasets: [{
             data: values,
-            backgroundColor: [
-              '#3b82f6', // Automovil
-              '#a855f7', // Camion
-              '#f97316', // Autobus
-              '#06b6d4', // Motocicleta
-              '#84cc16', // Bicicleta
-              '#64748b'  // Desconocido
-            ],
+            backgroundColor: ['#3b82f6', '#a855f7', '#f97316', '#06b6d4', '#84cc16', '#64748b'],
             borderWidth: 2,
             borderColor: '#0f172a'
           }]
@@ -866,15 +1418,8 @@
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: {
-              position: 'bottom',
-              labels: { color: '#cbd5e1', font: { size: 11 }, boxWidth: 12 }
-            },
-            tooltip: {
-              backgroundColor: '#1e293b',
-              titleColor: '#ffffff',
-              bodyColor: '#cbd5e1',
-            }
+            legend: { position: 'bottom', labels: { color: '#cbd5e1', font: { size: 11 }, boxWidth: 12 } },
+            tooltip: { backgroundColor: '#1e293b', titleColor: '#ffffff', bodyColor: '#cbd5e1' }
           },
           cutout: '65%'
         }
@@ -944,15 +1489,11 @@
     }
 
     function prevEventsPage() {
-      if (eventsOffset > 0) {
-        loadEvents(Math.max(0, eventsOffset - eventsLimit));
-      }
+      if (eventsOffset > 0) loadEvents(Math.max(0, eventsOffset - eventsLimit));
     }
 
     function nextEventsPage() {
-      if (eventsOffset + eventsLimit < totalEvents) {
-        loadEvents(eventsOffset + eventsLimit);
-      }
+      if (eventsOffset + eventsLimit < totalEvents) loadEvents(eventsOffset + eventsLimit);
     }
 
     function exportCSV() {
@@ -962,9 +1503,7 @@
       const date = document.getElementById('filter-ev-date').value || '';
       
       let url = `/api/history/export/csv?camera_id=${cam}&vehicle_type=${type}&direction=${dir}`;
-      if (date) {
-        url += `&start_date=${date}&end_date=${date}`;
-      }
+      if (date) url += `&start_date=${date}&end_date=${date}`;
       window.location.href = url;
     }
 
@@ -987,7 +1526,7 @@
           <div class="p-3 bg-brand-950 border border-brand-700/60 rounded-lg flex items-center justify-between">
             <div>
               <div class="font-bold text-white">${cam.name} (Índice ${cam.index})</div>
-              <div class="text-[11px] text-slate-400">Resolución recomendada: ${cam.resolution || 'Auto'}</div>
+              <div class="text-[11px] text-slate-400">Resolución: ${cam.resolution || 'Auto'}</div>
             </div>
             <button onclick="addDiscoveredCamera(${cam.index})" class="px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs">
               Vincular
@@ -1037,10 +1576,10 @@
     }
 
     // ── INICIALIZACIÓN ──────────────────────────────────────────────────────
-    window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', async () => {
+      await loadLocations();
       loadCameras();
       connectWebSocket();
-      // Inicializar selector de fecha a hoy
       document.getElementById('filter-analytics-date').value = new Date().toISOString().split('T')[0];
     });
   </script>
