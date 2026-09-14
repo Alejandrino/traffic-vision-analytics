@@ -1592,8 +1592,8 @@
                 ${isEnabled ? 'ACTIVA' : 'PAUSADA'}
               </span>
             </div>
-            <div class="flex items-center gap-2">
-              <span class="text-slate-400 text-[11px]" id="cam-${camId}-fps">${isEnabled ? '-- FPS' : 'PAUSADA'}</span>
+            <div class="flex items-center gap-1.5">
+              <span class="text-slate-400 text-[11px] mr-1" id="cam-${camId}-fps">${isEnabled ? '-- FPS' : 'PAUSADA'}</span>
               
               <!-- Botón de Activar / Desactivar Cámara -->
               <button onclick="toggleCameraState('${camId}', ${!isEnabled})"
@@ -1608,16 +1608,51 @@
                 `}
               </button>
 
+              <!-- Botón de Calibrar / Editar Línea de Conteo -->
+              <button onclick="editLine('${camId}')"
+                class="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 transition bg-blue-950/60 text-blue-300 border border-blue-800/60 hover:bg-blue-900/80 hover:text-white"
+                title="Editar y calibrar línea virtual de cruce">
+                <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                <span>Línea</span>
+              </button>
+
               <!-- Botón de Reiniciar Contadores -->
               <button onclick="resetCamCounters('${camId}')" class="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-brand-700/50 transition" title="Reiniciar Contadores">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
               </button>
             </div>
           </div>
-          <div class="relative flex-1 bg-black min-h-[260px] flex items-center justify-center overflow-hidden">
+          <div class="relative flex-1 bg-black min-h-[260px] flex items-center justify-center overflow-hidden select-none">
             <img id="stream-img-${camId}" src="/video_feed/${camId}" class="w-full h-full object-cover ${isEnabled ? '' : 'opacity-30 filter grayscale'}" alt="Feed ${camId}" />
+            
+            <!-- SVG interactivo para arrastrar los puntos de la línea de cruce -->
+            <svg id="fline-svg-${camId}" class="absolute inset-0 w-full h-full pointer-events-none hidden z-20 cursor-crosshair"></svg>
+
+            <!-- Barra flotante de control del editor de línea -->
+            <div id="fline-editor-${camId}" class="absolute top-2 left-1/2 -translate-x-1/2 hidden bg-brand-950/95 backdrop-blur-md px-3 py-1.5 rounded-xl flex items-center gap-2 z-30 border border-blue-500/50 shadow-2xl">
+              <div class="flex items-center gap-1.5 pr-2 border-r border-brand-700/70 text-[11px]">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-emerald-950"></span>
+                <span class="text-slate-200 font-semibold">In</span>
+                <span class="text-slate-500">→</span>
+                <span class="w-2.5 h-2.5 rounded-full bg-red-400 ring-2 ring-red-950"></span>
+                <span class="text-slate-200 font-semibold">Out</span>
+              </div>
+              <span id="fline-coords-${camId}" class="font-mono text-[10px] text-blue-300 px-1.5 py-0.5 bg-blue-950/70 rounded border border-blue-800/40 whitespace-nowrap"></span>
+              <button onclick="swapLineOrientation('${camId}')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 flex items-center gap-1 font-medium transition" title="Invertir dirección Entrada/Salida">
+                <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
+                <span>Invertir</span>
+              </button>
+              <button onclick="saveLine('${camId}')" class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white flex items-center gap-1 transition shadow-sm" title="Guardar cambios">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <span>Guardar</span>
+              </button>
+              <button onclick="cancelEditLine('${camId}')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 transition" title="Cancelar edición">
+                <span>Cancelar</span>
+              </button>
+            </div>
+
             ${!isEnabled ? `
-              <div class="absolute inset-0 flex flex-col items-center justify-center p-4 bg-black/60 text-center">
+              <div class="absolute inset-0 flex flex-col items-center justify-center p-4 bg-black/60 text-center z-10">
                 <svg class="w-10 h-10 text-slate-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
                 <div class="text-sm font-bold text-slate-200">Cámara Desactivada</div>
                 <p class="text-xs text-slate-400 mt-1 max-w-xs">El procesamiento en tiempo real está pausado para ahorrar recursos de NPU y CPU.</p>
@@ -1640,6 +1675,264 @@
           </div>
         `;
         grid.appendChild(card);
+      }
+    }
+
+    // ─── EDITOR INTERACTIVO DE LÍNEAS DE CRUCE ──────────────────────────────
+    const lineEditors = {}; // camId -> { start, end, dragging, updateDraw, cleanup }
+
+    function editLineFromDevices(camId) {
+      switchTab('live');
+      setTimeout(() => {
+        editLine(camId);
+        const card = document.getElementById(`live-card-${camId}`);
+        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 200);
+    }
+
+    async function editLine(camId) {
+      try {
+        const res = await fetch(`/api/line/${camId}`);
+        if (!res.ok) throw new Error("No se pudo obtener la configuración de la línea.");
+        const data = await res.json();
+
+        const svg = document.getElementById(`fline-svg-${camId}`);
+        const bar = document.getElementById(`fline-editor-${camId}`);
+        if (!svg || !bar) return;
+
+        svg.classList.remove('hidden');
+        svg.classList.add('pointer-events-auto');
+        bar.classList.remove('hidden');
+        bar.classList.add('flex');
+
+        initLineEditor(camId, data.line.start, data.line.end);
+      } catch (err) {
+        alert("Error al cargar la línea para edición: " + err.message);
+        console.error(err);
+      }
+    }
+
+    function initLineEditor(camId, startCoords, endCoords) {
+      const svg = document.getElementById(`fline-svg-${camId}`);
+      if (!svg) return;
+      svg.innerHTML = '';
+
+      if (lineEditors[camId] && lineEditors[camId].cleanup) {
+        lineEditors[camId].cleanup();
+      }
+
+      const NATIVE_W = 1280;
+      const NATIVE_H = 720;
+
+      lineEditors[camId] = {
+        start: [Number(startCoords[0]), Number(startCoords[1])],
+        end: [Number(endCoords[0]), Number(endCoords[1])],
+        dragging: null,
+        cleanup: null
+      };
+
+      const state = lineEditors[camId];
+      const svgNS = "http://www.w3.org/2000/svg";
+
+      // 1. Línea sombra de contraste
+      const shadowLine = document.createElementNS(svgNS, "line");
+      shadowLine.setAttribute("stroke", "#000000");
+      shadowLine.setAttribute("stroke-width", "6");
+      shadowLine.setAttribute("stroke-opacity", "0.6");
+      svg.appendChild(shadowLine);
+
+      // 2. Línea guía principal con guiones
+      const mainLine = document.createElementNS(svgNS, "line");
+      mainLine.setAttribute("stroke", "#f59e0b");
+      mainLine.setAttribute("stroke-width", "3.5");
+      mainLine.setAttribute("stroke-dasharray", "8 6");
+      svg.appendChild(mainLine);
+
+      // 3. Handle Entrada (IN - Verde)
+      const startG = document.createElementNS(svgNS, "g");
+      startG.setAttribute("class", "cursor-grab active:cursor-grabbing");
+      
+      const startHalo = document.createElementNS(svgNS, "circle");
+      startHalo.setAttribute("r", "20");
+      startHalo.setAttribute("fill", "#10b981");
+      startHalo.setAttribute("fill-opacity", "0.35");
+
+      const startCircle = document.createElementNS(svgNS, "circle");
+      startCircle.setAttribute("r", "13");
+      startCircle.setAttribute("fill", "#10b981");
+      startCircle.setAttribute("stroke", "#ffffff");
+      startCircle.setAttribute("stroke-width", "2.5");
+
+      const startText = document.createElementNS(svgNS, "text");
+      startText.textContent = "IN";
+      startText.setAttribute("text-anchor", "middle");
+      startText.setAttribute("dominant-baseline", "central");
+      startText.setAttribute("fill", "#ffffff");
+      startText.setAttribute("font-size", "10");
+      startText.setAttribute("font-weight", "bold");
+      startText.setAttribute("pointer-events", "none");
+
+      startG.appendChild(startHalo);
+      startG.appendChild(startCircle);
+      startG.appendChild(startText);
+      svg.appendChild(startG);
+
+      // 4. Handle Salida (OUT - Rojo)
+      const endG = document.createElementNS(svgNS, "g");
+      endG.setAttribute("class", "cursor-grab active:cursor-grabbing");
+
+      const endHalo = document.createElementNS(svgNS, "circle");
+      endHalo.setAttribute("r", "20");
+      endHalo.setAttribute("fill", "#ef4444");
+      endHalo.setAttribute("fill-opacity", "0.35");
+
+      const endCircle = document.createElementNS(svgNS, "circle");
+      endCircle.setAttribute("r", "13");
+      endCircle.setAttribute("fill", "#ef4444");
+      endCircle.setAttribute("stroke", "#ffffff");
+      endCircle.setAttribute("stroke-width", "2.5");
+
+      const endText = document.createElementNS(svgNS, "text");
+      endText.textContent = "OUT";
+      endText.setAttribute("text-anchor", "middle");
+      endText.setAttribute("dominant-baseline", "central");
+      endText.setAttribute("fill", "#ffffff");
+      endText.setAttribute("font-size", "9");
+      endText.setAttribute("font-weight", "bold");
+      endText.setAttribute("pointer-events", "none");
+
+      endG.appendChild(endHalo);
+      endG.appendChild(endCircle);
+      endG.appendChild(endText);
+      svg.appendChild(endG);
+
+      // Proyección nativa -> pixeles SVG en pantalla
+      const updateDraw = () => {
+        const rect = svg.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+
+        const scaleX = rect.width / NATIVE_W;
+        const scaleY = rect.height / NATIVE_H;
+
+        const sx = state.start[0] * scaleX;
+        const sy = state.start[1] * scaleY;
+        const ex = state.end[0] * scaleX;
+        const ey = state.end[1] * scaleY;
+
+        shadowLine.setAttribute("x1", sx); shadowLine.setAttribute("y1", sy);
+        shadowLine.setAttribute("x2", ex); shadowLine.setAttribute("y2", ey);
+
+        mainLine.setAttribute("x1", sx); mainLine.setAttribute("y1", sy);
+        mainLine.setAttribute("x2", ex); mainLine.setAttribute("y2", ey);
+
+        startG.setAttribute("transform", `translate(${sx}, ${sy})`);
+        endG.setAttribute("transform", `translate(${ex}, ${ey})`);
+
+        const coordsBadge = document.getElementById(`fline-coords-${camId}`);
+        if (coordsBadge) {
+          coordsBadge.textContent = `(${state.start[0]}, ${state.start[1]}) → (${state.end[0]}, ${state.end[1]})`;
+        }
+      };
+
+      state.updateDraw = updateDraw;
+
+      const getPointFromClient = (clientX, clientY) => {
+        const rect = svg.getBoundingClientRect();
+        const clampedX = Math.max(0, Math.min(rect.width, clientX - rect.left));
+        const clampedY = Math.max(0, Math.min(rect.height, clientY - rect.top));
+        return [
+          Math.round(clampedX * (NATIVE_W / rect.width)),
+          Math.round(clampedY * (NATIVE_H / rect.height))
+        ];
+      };
+
+      // Mouse drag
+      startG.onmousedown = (e) => { state.dragging = 'start'; e.stopPropagation(); e.preventDefault(); };
+      endG.onmousedown = (e) => { state.dragging = 'end'; e.stopPropagation(); e.preventDefault(); };
+
+      const onMouseMove = (e) => {
+        if (!state.dragging) return;
+        state[state.dragging] = getPointFromClient(e.clientX, e.clientY);
+        updateDraw();
+      };
+      const onMouseUp = () => { state.dragging = null; };
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+
+      // Touch drag
+      startG.ontouchstart = (e) => { state.dragging = 'start'; e.stopPropagation(); e.preventDefault(); };
+      endG.ontouchstart = (e) => { state.dragging = 'end'; e.stopPropagation(); e.preventDefault(); };
+
+      const onTouchMove = (e) => {
+        if (!state.dragging || !e.touches[0]) return;
+        state[state.dragging] = getPointFromClient(e.touches[0].clientX, e.touches[0].clientY);
+        updateDraw();
+        e.preventDefault();
+      };
+      const onTouchEnd = () => { state.dragging = null; };
+
+      window.addEventListener('touchmove', onTouchMove, { passive: false });
+      window.addEventListener('touchend', onTouchEnd);
+      window.addEventListener('resize', updateDraw);
+
+      state.cleanup = () => {
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('touchmove', onTouchMove);
+        window.removeEventListener('touchend', onTouchEnd);
+        window.removeEventListener('resize', updateDraw);
+      };
+
+      updateDraw();
+    }
+
+    function swapLineOrientation(camId) {
+      const state = lineEditors[camId];
+      if (!state) return;
+      const tmp = state.start;
+      state.start = state.end;
+      state.end = tmp;
+      if (state.updateDraw) state.updateDraw();
+    }
+
+    function cancelEditLine(camId) {
+      const svg = document.getElementById(`fline-svg-${camId}`);
+      const bar = document.getElementById(`fline-editor-${camId}`);
+      if (svg) {
+        svg.classList.add('hidden');
+        svg.classList.remove('pointer-events-auto');
+        svg.innerHTML = '';
+      }
+      if (bar) {
+        bar.classList.add('hidden');
+        bar.classList.remove('flex');
+      }
+      if (lineEditors[camId] && lineEditors[camId].cleanup) {
+        lineEditors[camId].cleanup();
+      }
+      delete lineEditors[camId];
+    }
+
+    async function saveLine(camId) {
+      const state = lineEditors[camId];
+      if (!state) return;
+
+      try {
+        const res = await fetch(`/api/line/${camId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start: state.start, end: state.end })
+        });
+        if (!res.ok) throw new Error("Error al comunicarse con el servidor.");
+        
+        cancelEditLine(camId);
+        if (currentTab === 'settings') {
+          loadDevicesSettings();
+        }
+      } catch (err) {
+        alert("Error al guardar la línea: " + err.message);
+        console.error(err);
       }
     }
 
@@ -1681,9 +1974,27 @@
           return;
         }
 
+        // Consultar coordenadas actuales de cada línea configurada
+        const linesRes = await Promise.all(
+          Object.keys(confCams).map(async cid => {
+            try {
+              const r = await fetch(`/api/line/${cid}`);
+              if (r.ok) {
+                const ld = await r.json();
+                return { [cid]: ld.line };
+              }
+            } catch(e) {}
+            return { [cid]: null };
+          })
+        );
+        const linesMap = Object.assign({}, ...linesRes);
+
         container.innerHTML = Object.keys(confCams).map(cid => {
           const cam = confCams[cid];
           const isEnabled = cam.enabled !== false;
+          const line = linesMap[cid];
+          const lineText = line ? `P1: (${line.start[0]}, ${line.start[1]}) → P2: (${line.end[0]}, ${line.end[1]})` : 'No configurada';
+
           return `
             <div class="p-3.5 bg-brand-950 border border-brand-700/60 rounded-xl flex items-center justify-between">
               <div>
@@ -1695,9 +2006,20 @@
                   </span>
                 </div>
                 <div class="text-[11px] text-slate-400 mt-1 font-mono">Origen: ${cam.source}</div>
+                <div class="text-[11px] text-blue-300 mt-0.5 font-mono flex items-center gap-1">
+                  <svg class="w-3 h-3 text-blue-400 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+                  <span>Línea: ${lineText}</span>
+                </div>
               </div>
 
               <div class="flex items-center gap-2">
+                <button onclick="editLineFromDevices('${cid}')"
+                  class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-900/30 text-blue-300 border border-blue-700/50 hover:bg-blue-800/50 hover:text-white transition flex items-center gap-1.5 shadow-sm"
+                  title="Abrir editor visual de línea de cruce">
+                  <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                  <span>Calibrar Línea</span>
+                </button>
+
                 <button onclick="toggleCameraState('${cid}', ${!isEnabled})"
                   class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm ${isEnabled ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40 hover:bg-amber-600 hover:text-white' : 'bg-emerald-600 text-white hover:bg-emerald-500'}">
                   ${isEnabled ? `
