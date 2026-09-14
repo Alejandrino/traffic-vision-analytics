@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 60" fill="none">
+  <rect width="240" height="60" rx="8" fill="#20242c"/>
+  <circle cx="34" cy="30" r="16" stroke="#e2e8f0" stroke-width="3"/>
+  <rect x="22" y="27" width="24" height="6" fill="#ef4444" rx="2"/>
+  <text x="58" y="31" fill="#ffffff" font-family="sans-serif" font-weight="900" font-size="14">NISSAN MÉXICO</text>
+  <text x="58" y="44" fill="#94a3b8" font-family="sans-serif" font-weight="600" font-size="10">INNOVATION THAT EXCITES</text>
+</svg>

@@ -101,6 +101,15 @@
       </div>
     </div>
 
+    <!-- Selector de Cliente Multi-tenant & Logo -->
+    <div class="flex items-center gap-2 bg-brand-950 px-3 py-1.5 rounded-lg border border-brand-700/70 shadow-inner">
+      <img id="header-client-logo" src="/static/uploads/logos/apex_logo.svg" class="h-6 max-w-[100px] object-contain rounded bg-white/5 p-0.5" onerror="this.src='/static/uploads/logos/apex_logo.svg'" alt="Logo Cliente" />
+      <label class="text-xs text-slate-400 font-medium">Cliente:</label>
+      <select id="global-client-select" onchange="onGlobalClientChange()" class="bg-transparent text-xs text-emerald-300 font-bold outline-none cursor-pointer">
+        <option value="all" class="bg-brand-900">👑 Administrador General (Todos)</option>
+      </select>
+    </div>
+
     <!-- Selector de Ubicación Global / Plaza -->
     <div class="flex items-center gap-2 bg-brand-950 px-3 py-1.5 rounded-lg border border-brand-700/70">
       <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
@@ -109,6 +118,13 @@
         <option value="all" class="bg-brand-900">Todas las Ubicaciones</option>
       </select>
     </div>
+
+    <!-- Botón Rápido de Reporte Ejecutivo PDF -->
+    <button onclick="openPrintReport()" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1.5 shadow-sm transition" title="Generar e imprimir informe ejecutivo PDF con logotipo y certificación Apex">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+      <span>Reporte PDF</span>
+    </button>
+
 
     <!-- Pestañas Principales -->
     <nav class="flex items-center gap-1 bg-brand-950 p-1 rounded-lg border border-brand-700/50" id="app-nav">
@@ -694,7 +710,72 @@
         </div>
       </div>
 
+      <!-- ══ GESTIÓN DE IDENTIDAD DE MARCA Y LOGOTIPO POR CLIENTE ══ -->
+      <div class="card-box bg-brand-900 border border-brand-700/60 rounded-xl p-5 shadow-sm space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-brand-700/60 pb-3">
+          <div>
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+              Personalización de Marca y Logotipo por Cliente (Reportes PDF)
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">Sube el logotipo oficial de cada cliente para estamparlo automáticamente en la cabecera de sus reportes ejecutivos de aforo y energía.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="openPrintReportForCurrentClient()" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+              Imprimir Reporte PDF del Cliente
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+          <!-- Selector y Datos del Cliente -->
+          <div class="space-y-3 text-xs">
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Seleccionar Cliente a Personalizar:</label>
+              <select id="brand-client-select" onchange="onBrandClientSelectChange()" class="w-full bg-brand-950 border border-brand-700 rounded px-3 py-2 text-white outline-none focus:border-blue-500 cursor-pointer">
+                <!-- Poblado dinámicamente -->
+              </select>
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Nombre de la Empresa / Marca:</label>
+              <input type="text" id="brand-client-name" readonly class="w-full bg-brand-950 border border-brand-800 rounded px-3 py-2 text-slate-300 font-semibold cursor-not-allowed" />
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Correo Electrónico de Auditoría:</label>
+              <input type="email" id="brand-client-email" readonly class="w-full bg-brand-950 border border-brand-800 rounded px-3 py-2 text-slate-400 cursor-not-allowed" />
+            </div>
+          </div>
+
+          <!-- Previsualización del Logo -->
+          <div class="bg-brand-950 p-4 rounded-xl border border-brand-700/60 flex flex-col items-center justify-center min-h-[160px] text-center">
+            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Vista Previa del Logotipo</span>
+            <div class="h-20 w-48 bg-brand-900/80 rounded-lg border border-brand-800 flex items-center justify-center p-2">
+              <img id="brand-logo-preview" src="/static/uploads/logos/default_cerveceria.svg" alt="Previsualización de Logo" class="max-h-16 max-w-full object-contain" onerror="this.src='/static/uploads/logos/apex_logo.svg'" />
+            </div>
+            <p id="brand-logo-path" class="text-[10px] text-slate-500 font-mono mt-2 truncate max-w-xs">/static/uploads/logos/...</p>
+          </div>
+
+          <!-- Selector y Subida de Archivo -->
+          <div class="space-y-3 text-xs bg-brand-950 p-4 rounded-xl border border-brand-700/60">
+            <div>
+              <label class="block text-slate-300 font-semibold mb-1">Subir Archivo de Logotipo (PNG, SVG, JPG):</label>
+              <input type="file" id="brand-file-input" accept=".png,.jpg,.jpeg,.svg,.webp" class="block w-full text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer" onchange="onBrandFileSelected(event)" />
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">O ingresar URL directa del logo:</label>
+              <input type="text" id="brand-url-input" placeholder="https://ejemplo.com/logo.png" class="w-full bg-brand-900 border border-brand-700 rounded px-2.5 py-1.5 text-white outline-none focus:border-blue-500 text-xs" />
+            </div>
+            <button onclick="submitClientLogo()" class="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition flex items-center justify-center gap-1.5 shadow-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              <span>Guardar Logotipo para Reportes</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
     </section>
+
 
     <!-- ────────────────────────────────────────────────────────────────────────
          PESTAÑA 5: REGISTRO COMPLETO DE EVENTOS (BITÁCORA)
@@ -848,8 +929,95 @@
             <p class="text-slate-500">Cargando cámaras...</p>
           </div>
         </div>
+
+        <!-- ═══ PLANTILLA ADMINISTRADOR GENERAL: ALTA DE DISPOSITIVOS NOVASTAR Y SHELLY ═══ -->
+        <div class="col-span-1 md:col-span-2 bg-brand-900 border border-brand-700/60 rounded-xl p-5 shadow-sm space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-brand-700/60 pb-3">
+            <div>
+              <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
+                Alta y Aprovisionamiento de Controladores (NovaStar TB40 / VX600 Pro / Shelly)
+              </h3>
+              <p class="text-xs text-slate-400 mt-0.5">Plantilla para que el Administrador General registre procesadores para pantallas simples o de doble cara conmutables por Preset.</p>
+            </div>
+            <button onclick="loadHardwareDevices()" class="text-xs text-blue-400 hover:underline">Actualizar lista de dispositivos</button>
+          </div>
+
+          <!-- Formulario de Registro de Dispositivo -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs bg-brand-950 p-4 rounded-xl border border-brand-700/50">
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Ubicación Asignada:</label>
+              <select id="new-dev-location" class="w-full bg-brand-900 border border-brand-700 rounded px-2.5 py-2 text-white outline-none focus:border-blue-500 cursor-pointer"></select>
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Tipo de Dispositivo:</label>
+              <select id="new-dev-type" onchange="onDeviceTypeChange()" class="w-full bg-brand-900 border border-brand-700 rounded px-2.5 py-2 text-white outline-none focus:border-blue-500 cursor-pointer">
+                <option value="TB40">NovaStar Taurus TB40 (Reproductor)</option>
+                <option value="VX600_PRO" selected>NovaStar VX600 Pro (Procesador Doble Pantalla)</option>
+                <option value="HYBRID">Híbrido (TB40 + VX600 Pro)</option>
+                <option value="SHELLY_PRO">Shelly Pro 4PM (Medidor Eléctrico)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Nombre / Identificador:</label>
+              <input type="text" id="new-dev-name" placeholder="ej. VX600 Pro — Cara A y B" class="w-full bg-brand-900 border border-brand-700 rounded px-2.5 py-2 text-white outline-none focus:border-blue-500" />
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1 font-medium">Dirección IP y Puerto:</label>
+              <div class="flex gap-1.5">
+                <input type="text" id="new-dev-ip" placeholder="192.168.1.160" class="flex-1 bg-brand-900 border border-brand-700 rounded px-2 py-2 text-white outline-none font-mono text-xs" />
+                <input type="number" id="new-dev-port" value="6000" class="w-16 bg-brand-900 border border-brand-700 rounded px-1.5 py-2 text-white outline-none font-mono text-xs" />
+              </div>
+            </div>
+
+            <!-- Opciones avanzadas de doble cara y preset -->
+            <div id="new-dev-dual-options" class="col-span-1 sm:col-span-2 lg:col-span-4 grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-brand-800">
+              <div class="flex items-center gap-2 pt-2">
+                <input type="checkbox" id="new-dev-dual" checked class="w-4 h-4 rounded text-blue-600 bg-brand-900 border-brand-700" />
+                <label for="new-dev-dual" class="text-xs text-slate-200 font-medium cursor-pointer">Pantalla de dos caras (Cara A / Cara B)</label>
+              </div>
+              <div class="col-span-2">
+                <label class="block text-slate-400 mb-1 font-medium">Preset Inicial de Hardware:</label>
+                <select id="new-dev-preset" class="w-full bg-brand-900 border border-brand-700 rounded px-2.5 py-2 text-white outline-none focus:border-blue-500 cursor-pointer">
+                  <option value="preset_mirror_1tb40">Preset 1 — 1x TB40 Espejo / Unificado (Ambas Caras)</option>
+                  <option value="preset_dual_2tb40">Preset 2 — 2x TB40 Contenido Dual Independiente (Cara A + Cara B)</option>
+                  <option value="preset_pip_promo">Preset 3 — PIP / Multiventana Dinámica</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="col-span-1 sm:col-span-2 lg:col-span-4 flex justify-end gap-2 pt-2">
+              <button onclick="submitNewDevice()" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white transition shadow-sm flex items-center gap-1.5">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                <span>Registrar Dispositivo en la Red</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Tabla de Dispositivos Registrados -->
+          <div class="overflow-x-auto rounded-lg border border-brand-800">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-brand-950 text-slate-400 border-b border-brand-700/60 uppercase tracking-wider text-[11px]">
+                <tr>
+                  <th class="p-2.5 font-semibold">Dispositivo</th>
+                  <th class="p-2.5 font-semibold">Tipo</th>
+                  <th class="p-2.5 font-semibold">Ubicación</th>
+                  <th class="p-2.5 font-semibold">IP : Puerto</th>
+                  <th class="p-2.5 font-semibold">Modo Pantalla</th>
+                  <th class="p-2.5 font-semibold">Preset Activo / Conmutación</th>
+                  <th class="p-2.5 text-right font-semibold">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="hardware-devices-table" class="divide-y divide-brand-800 text-slate-300">
+                <tr><td colspan="7" class="p-4 text-center text-slate-500">Cargando dispositivos...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </div>
     </section>
+
 
   </main>
 
@@ -958,13 +1126,407 @@
         refreshHardwareTelemetry();
       } else if (tab === 'campaigns') {
         loadCampaignsData();
+        loadClientsBranding();
       } else if (tab === 'events') {
         loadEvents(0);
       } else if (tab === 'settings') {
         scanDevices();
         loadDevicesSettings();
+        loadHardwareDevices();
       }
     }
+
+    // ── GESTIÓN MULTI-CLIENTE Y MARCA (MULTI-TENANT) ─────────────────────────
+    let clients = [];
+    let currentClientId = 'all';
+    let pendingLogoFile = null;
+
+    async function loadClients() {
+      try {
+        const res = await fetch('/api/clients');
+        const data = await res.json();
+        clients = data.clients || [];
+
+        const sel = document.getElementById('global-client-select');
+        const brandSel = document.getElementById('brand-client-select');
+        
+        if (sel) {
+          sel.innerHTML = '<option value="all" class="bg-brand-900">👑 Administrador General (Todos)</option>';
+          clients.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.id;
+            opt.textContent = c.name;
+            opt.className = 'bg-brand-900';
+            sel.appendChild(opt);
+          });
+        }
+
+        if (brandSel) {
+          brandSel.innerHTML = '';
+          clients.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.id;
+            opt.textContent = c.name;
+            opt.className = 'bg-brand-900';
+            brandSel.appendChild(opt);
+          });
+          onBrandClientSelectChange();
+        }
+      } catch (e) {
+        console.error("Error cargando clientes:", e);
+      }
+    }
+
+    function onGlobalClientChange() {
+      const sel = document.getElementById('global-client-select');
+      currentClientId = sel ? sel.value : 'all';
+      const headerLogo = document.getElementById('header-client-logo');
+
+      if (currentClientId === 'all') {
+        if (headerLogo) headerLogo.src = '/static/uploads/logos/apex_logo.svg';
+        // Restaurar todas las ubicaciones en el selector
+        const locSel = document.getElementById('global-location-select');
+        if (locSel) {
+          locSel.innerHTML = '<option value="all" class="bg-brand-900">Todas las Ubicaciones</option>';
+          locations.forEach(loc => {
+            const opt = document.createElement('option');
+            opt.value = loc.id;
+            opt.textContent = loc.name;
+            opt.className = 'bg-brand-900';
+            locSel.appendChild(opt);
+          });
+          locSel.value = 'all';
+          selectedLocation = 'all';
+        }
+      } else {
+        const client = clients.find(c => c.id === currentClientId);
+        if (client) {
+          if (headerLogo && client.logo_url) {
+            headerLogo.src = client.logo_url;
+          }
+          // Filtrar ubicaciones autorizadas del cliente
+          const locSel = document.getElementById('global-location-select');
+          if (locSel && client.locations && client.locations.length > 0) {
+            locSel.innerHTML = '';
+            client.locations.forEach(loc => {
+              const opt = document.createElement('option');
+              opt.value = loc.id;
+              opt.textContent = loc.name;
+              opt.className = 'bg-brand-900';
+              locSel.appendChild(opt);
+            });
+            locSel.value = client.locations[0].id;
+            selectedLocation = locSel.value;
+          }
+        }
+      }
+
+      // Refrescar vistas según la pestaña activa
+      if (currentTab === 'live') loadCameras();
+      if (currentTab === 'analytics') loadAnalyticsData();
+      if (currentTab === 'hardware') refreshHardwareTelemetry();
+      if (currentTab === 'campaigns') loadCampaignsData();
+      if (currentTab === 'events') loadEvents(0);
+      if (currentTab === 'settings') loadHardwareDevices();
+    }
+
+    function loadClientsBranding() {
+      const brandSel = document.getElementById('brand-client-select');
+      if (brandSel && brandSel.options.length === 0) {
+        loadClients();
+      } else {
+        onBrandClientSelectChange();
+      }
+    }
+
+    function onBrandClientSelectChange() {
+      const sel = document.getElementById('brand-client-select');
+      if (!sel) return;
+      const cid = sel.value;
+      const client = clients.find(c => c.id === cid);
+      if (!client) return;
+
+      const nameEl = document.getElementById('brand-client-name');
+      const emailEl = document.getElementById('brand-client-email');
+      const previewEl = document.getElementById('brand-logo-preview');
+      const pathEl = document.getElementById('brand-logo-path');
+      const urlInput = document.getElementById('brand-url-input');
+
+      if (nameEl) nameEl.value = client.name || '';
+      if (emailEl) emailEl.value = client.contact_email || 'Sin correo asignado';
+      const logoUrl = client.logo_url || '/static/uploads/logos/default_cerveceria.svg';
+      if (previewEl) previewEl.src = logoUrl;
+      if (pathEl) pathEl.textContent = logoUrl;
+      if (urlInput) urlInput.value = client.logo_url && !client.logo_url.startsWith('/static') ? client.logo_url : '';
+    }
+
+    function onBrandFileSelected(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      pendingLogoFile = file;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const preview = document.getElementById('brand-logo-preview');
+        const pathEl = document.getElementById('brand-logo-path');
+        if (preview) preview.src = e.target.result;
+        if (pathEl) pathEl.textContent = `Archivo seleccionado: ${file.name} (${Math.round(file.size / 1024)} KB)`;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function submitClientLogo() {
+      const sel = document.getElementById('brand-client-select');
+      if (!sel) return;
+      const cid = sel.value;
+      const urlInput = document.getElementById('brand-url-input').value.trim();
+
+      try {
+        if (pendingLogoFile) {
+          const formData = new FormData();
+          formData.append('file', pendingLogoFile);
+
+          const res = await fetch(`/api/client/${cid}/logo`, {
+            method: 'POST',
+            body: formData
+          });
+          const data = await res.json();
+          if (res.ok) {
+            alert("Logotipo corporativo subido y guardado exitosamente.");
+            pendingLogoFile = null;
+            document.getElementById('brand-file-input').value = '';
+            await loadClients();
+            const client = clients.find(c => c.id === cid);
+            if (client && currentClientId === cid) {
+              const hl = document.getElementById('header-client-logo');
+              if (hl) hl.src = data.logo_url;
+            }
+          } else {
+            alert("Error: " + (data.detail || "No se pudo subir el logo"));
+          }
+        } else if (urlInput) {
+          const res = await fetch(`/api/client/${cid}/logo-url`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ logo_url: urlInput })
+          });
+          if (res.ok) {
+            alert("URL de logotipo guardada exitosamente.");
+            await loadClients();
+          }
+        } else {
+          alert("Por favor selecciona un archivo de imagen o ingresa una URL.");
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Error al guardar el logotipo.");
+      }
+    }
+
+    function openPrintReport(clientId = null, locationId = null) {
+      const cId = clientId || (currentClientId !== 'all' ? currentClientId : (clients[0] ? clients[0].id : 'cli_cerveceria'));
+      const lId = locationId || (selectedLocation !== 'all' ? selectedLocation : 'loc_minerva');
+      const url = `/report/print?client_id=${cId}&location_id=${lId}`;
+      window.open(url, '_blank');
+    }
+
+    function openPrintReportForCurrentClient() {
+      const sel = document.getElementById('brand-client-select');
+      const cId = sel ? sel.value : (clients[0] ? clients[0].id : 'cli_cerveceria');
+      const lId = selectedLocation !== 'all' ? selectedLocation : 'loc_minerva';
+      openPrintReport(cId, lId);
+    }
+
+    // ── GESTIÓN DE DISPOSITIVOS DE HARDWARE (TB40 / VX600 PRO / SHELLY) ─────
+    let hardwareDevices = [];
+
+    function onDeviceTypeChange() {
+      const type = document.getElementById('new-dev-type').value;
+      const portInput = document.getElementById('new-dev-port');
+      const dualOpts = document.getElementById('new-dev-dual-options');
+      const nameInput = document.getElementById('new-dev-name');
+
+      if (type === 'VX600_PRO') {
+        portInput.value = '6000';
+        dualOpts.classList.remove('hidden');
+        nameInput.placeholder = 'ej. NovaStar VX600 Pro — Cara A y B';
+      } else if (type === 'TB40') {
+        portInput.value = '8001';
+        dualOpts.classList.add('hidden');
+        nameInput.placeholder = 'ej. NovaStar TB40 Reproductor Primario';
+      } else if (type === 'HYBRID') {
+        portInput.value = '6000';
+        dualOpts.classList.remove('hidden');
+        nameInput.placeholder = 'ej. Sistema Híbrido TB40 + VX600 Pro';
+      } else if (type === 'SHELLY_PRO') {
+        portInput.value = '80';
+        dualOpts.classList.add('hidden');
+        nameInput.placeholder = 'ej. Shelly Pro 4PM Medidor Eléctrico';
+      }
+    }
+
+    async function loadHardwareDevices() {
+      const tbody = document.getElementById('hardware-devices-table');
+      const locSelect = document.getElementById('new-dev-location');
+      if (!tbody) return;
+
+      if (locSelect && locations.length > 0) {
+        locSelect.innerHTML = locations.map(l => `<option value="${l.id}">${l.name}</option>`).join('');
+      }
+
+      try {
+        const res = await fetch('/api/admin/devices');
+        const data = await res.json();
+        hardwareDevices = data.devices || [];
+
+        if (hardwareDevices.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" class="p-4 text-center text-slate-500">No hay controladores registrados. Añade uno arriba.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = hardwareDevices.map(d => {
+          const isDual = d.dual_screen_enabled ? true : false;
+          const isVx = d.device_type === 'VX600_PRO' || d.device_type === 'HYBRID';
+          const isOnline = d.telemetry ? (d.telemetry.connected !== false) : true;
+
+          let presetBadge = '';
+          if (isVx) {
+            const curPreset = d.active_preset || 'preset_mirror_1tb40';
+            const isMirror = curPreset === 'preset_mirror_1tb40';
+            presetBadge = `
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold ${isMirror ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-blue-950 text-blue-400 border border-blue-800'}">
+                  ${isMirror ? 'Preset 1 (1x TB40 Espejo)' : 'Preset 2 (2x TB40 Contenido Dual)'}
+                </span>
+                <select onchange="changeDevicePreset('${d.id}', this.value)" class="bg-brand-900 border border-brand-700 text-[11px] rounded px-1.5 py-0.5 text-slate-200 outline-none cursor-pointer hover:border-blue-500">
+                  <option value="preset_mirror_1tb40" ${isMirror ? 'selected' : ''}>Preset 1: 1x TB40 (Espejo)</option>
+                  <option value="preset_dual_2tb40" ${!isMirror ? 'selected' : ''}>Preset 2: 2x TB40 (Dual)</option>
+                  <option value="preset_pip_promo">Preset 3: PIP / Multiventana</option>
+                </select>
+              </div>
+            `;
+          } else {
+            presetBadge = `<span class="text-slate-500 text-[11px]">N/A (Pantalla estándar)</span>`;
+          }
+
+          let typeColor = 'bg-blue-950 text-blue-400 border-blue-800';
+          if (d.device_type === 'VX600_PRO') typeColor = 'bg-purple-950 text-purple-300 border-purple-800';
+          if (d.device_type === 'HYBRID') typeColor = 'bg-indigo-950 text-indigo-300 border-indigo-800';
+          if (d.device_type === 'SHELLY_PRO') typeColor = 'bg-amber-950 text-amber-400 border-amber-800';
+
+          return `
+            <tr class="hover:bg-brand-850/60 transition">
+              <td class="p-2.5">
+                <div class="flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-red-400'}"></span>
+                  <span class="font-bold text-white text-xs">${d.name}</span>
+                </div>
+                <div class="text-[10px] text-slate-500 font-mono mt-0.5">ID: ${d.id}</div>
+              </td>
+              <td class="p-2.5">
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold border ${typeColor}">${d.device_type}</span>
+              </td>
+              <td class="p-2.5 text-slate-300 font-medium">${d.location_name || d.location_id}</td>
+              <td class="p-2.5 font-mono text-slate-300 text-[11px]">${d.ip_address}:${d.port}</td>
+              <td class="p-2.5">
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold ${isDual ? 'bg-indigo-950 text-indigo-300 border border-indigo-800' : 'bg-slate-800 text-slate-400 border border-slate-700'}">
+                  ${isDual ? 'Doble Cara (A + B)' : 'Cara Simple'}
+                </span>
+              </td>
+              <td class="p-2.5">
+                ${presetBadge}
+              </td>
+              <td class="p-2.5 text-right">
+                <button onclick="deleteDevice('${d.id}')" class="p-1.5 text-slate-400 hover:text-red-400 hover:bg-brand-800 rounded transition" title="Eliminar dispositivo">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (err) {
+        console.error("Error al cargar dispositivos:", err);
+      }
+    }
+
+    async function submitNewDevice() {
+      const locId = document.getElementById('new-dev-location').value;
+      const type = document.getElementById('new-dev-type').value;
+      const name = document.getElementById('new-dev-name').value.trim();
+      const ip = document.getElementById('new-dev-ip').value.trim();
+      const port = parseInt(document.getElementById('new-dev-port').value, 10) || 6000;
+      const dual = document.getElementById('new-dev-dual').checked;
+      const preset = document.getElementById('new-dev-preset').value;
+
+      if (!name || !ip) {
+        alert("Por favor introduce el nombre y la dirección IP del dispositivo.");
+        return;
+      }
+
+      const devId = `dev_${type.toLowerCase()}_${Date.now().toString().slice(-5)}`;
+
+      try {
+        const res = await fetch('/api/admin/devices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: devId,
+            location_id: locId,
+            name: name,
+            device_type: type,
+            ip_address: ip,
+            port: port,
+            dual_screen_enabled: dual,
+            active_preset: preset,
+            notes: `Alta de ${type} en ${locId}`
+          })
+        });
+
+        if (res.ok) {
+          alert("Dispositivo registrado exitosamente.");
+          document.getElementById('new-dev-name').value = '';
+          document.getElementById('new-dev-ip').value = '';
+          await loadHardwareDevices();
+        } else {
+          const err = await res.json();
+          alert("Error: " + (err.detail || "No se pudo registrar"));
+        }
+      } catch (e) {
+        console.error(e);
+        alert("Error de conexión al registrar dispositivo.");
+      }
+    }
+
+    async function changeDevicePreset(deviceId, presetId) {
+      try {
+        const res = await fetch(`/api/admin/devices/${deviceId}/preset`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preset_id: presetId })
+        });
+        if (res.ok) {
+          await loadHardwareDevices();
+        } else {
+          alert("Error al conmutar preset en el procesador.");
+        }
+      } catch (e) {
+        console.error(e);
+        alert("Error de comunicación con el controlador.");
+      }
+    }
+
+    async function deleteDevice(deviceId) {
+      if (!confirm(`¿Deseas eliminar el dispositivo '${deviceId}'?`)) return;
+      try {
+        const res = await fetch(`/api/admin/devices/${deviceId}`, { method: 'DELETE' });
+        if (res.ok) {
+          await loadHardwareDevices();
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
 
     // ── MULTI-UBICACIÓN ─────────────────────────────────────────────────────
     async function loadLocations() {
@@ -2381,6 +2943,7 @@
     // ── INICIALIZACIÓN ──────────────────────────────────────────────────────
     window.addEventListener('DOMContentLoaded', async () => {
       await loadLocations();
+      await loadClients();
       loadCameras();
       connectWebSocket();
       document.getElementById('filter-analytics-date').value = new Date().toISOString().split('T')[0];

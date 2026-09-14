@@ -16,12 +16,14 @@ Dependencias: fastapi, uvicorn, opencv-python, camera_stream, traffic_analyzer, 
 """
 
 import asyncio
+import datetime
 import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
+import shutil
 
 import cv2
 import numpy as np
@@ -29,8 +31,9 @@ import uvicorn
 import io
 import csv
 from pydantic import BaseModel
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Response
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Response, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 import config
@@ -39,6 +42,7 @@ from traffic_analyzer import TrafficAnalyzer, VehicleMetrics
 import camera_manager
 import database
 import novastar_controller
+import novastar_vx600
 import shelly_controller
 import campaign_manager
 import solar_brightness_engine
@@ -160,6 +164,13 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# ── ARCHIVOS ESTÁTICOS Y LOGOS ───────────────────────────────────────────────
+static_dir = Path(__file__).parent / "static"
+static_dir.mkdir(parents=True, exist_ok=True)
+(static_dir / "uploads" / "logos").mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1100,8 +1111,589 @@ async def api_edge_sync_report(req: EdgeSyncRequest) -> JSONResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# GESTIÓN MULTI-CLIENTE Y LOGOTIPOS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/clients", summary="Listado de clientes registrados y pantallas asignadas")
+async def api_get_clients() -> JSONResponse:
+    clients = database.get_clients()
+    return JSONResponse({"status": "ok", "clients": clients})
+
+
+class ClientCreate(BaseModel):
+    id: str
+    name: str
+    contact_email: Optional[str] = ""
+    logo_url: Optional[str] = ""
+    location_ids: Optional[list[str]] = []
+
+@app.post("/api/clients", summary="Registrar o actualizar cliente")
+async def api_post_client(req: ClientCreate) -> JSONResponse:
+    cid = database.add_client(req.id, req.name, req.contact_email or "", req.logo_url or "")
+    if req.location_ids:
+        for loc in req.location_ids:
+            database.assign_client_location(cid, loc)
+    return JSONResponse({"status": "ok", "client_id": cid, "message": "Cliente guardado exitosamente."})
+
+
+@app.post("/api/client/{client_id}/logo", summary="Subir logotipo corporativo del cliente")
+async def api_upload_client_logo(client_id: str, file: UploadFile = File(...)) -> JSONResponse:
+    client = database.get_client(client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Cliente '{client_id}' no encontrado.")
+    
+    ext = Path(file.filename or "logo.png").suffix.lower()
+    if ext not in [".png", ".jpg", ".jpeg", ".svg", ".webp"]:
+        raise HTTPException(status_code=400, detail="Formato de imagen no soportado. Utilice PNG, JPG, SVG o WEBP.")
+    
+    filename = f"{client_id}_{int(time.time())}{ext}"
+    dest_path = static_dir / "uploads" / "logos" / filename
+    
+    with open(dest_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    logo_url = f"/static/uploads/logos/{filename}"
+    database.update_client_logo(client_id, logo_url)
+    logger.info(f"[CLIENT-LOGO] Logotipo actualizado para '{client_id}': {logo_url}")
+    return JSONResponse({"status": "ok", "client_id": client_id, "logo_url": logo_url})
+
+
+class LogoUrlUpdate(BaseModel):
+    logo_url: str
+
+@app.post("/api/client/{client_id}/logo-url", summary="Asignar URL de logotipo de cliente")
+async def api_set_client_logo_url(client_id: str, req: LogoUrlUpdate) -> JSONResponse:
+    client = database.get_client(client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Cliente '{client_id}' no encontrado.")
+    database.update_client_logo(client_id, req.logo_url)
+    return JSONResponse({"status": "ok", "client_id": client_id, "logo_url": req.logo_url})
+
+
+@app.get("/api/client/{client_id}/screens", summary="Pantallas y métricas asignadas a un cliente")
+async def api_get_client_screens(client_id: str) -> JSONResponse:
+    client = database.get_client(client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Cliente '{client_id}' no encontrado.")
+    
+    screens = database.get_client_screens(client_id)
+    enriched_screens = []
+    for s in screens:
+        loc_id = s["id"]
+        devs = database.get_hardware_devices(loc_id)
+        enriched_screens.append({
+            **s,
+            "devices": devs,
+        })
+    return JSONResponse({"status": "ok", "client": client, "screens": enriched_screens})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GESTIÓN DE DISPOSITIVOS DE HARDWARE (TB40 / VX600 PRO / SHELLY PRO)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/admin/devices", summary="Listado de dispositivos con telemetría en vivo")
+async def api_admin_devices(location_id: Optional[str] = None) -> JSONResponse:
+    devices = database.get_hardware_devices(location_id)
+    enriched = []
+    for d in devices:
+        item = dict(d)
+        dtype = item.get("device_type", "")
+        ip = item.get("ip_address", "127.0.0.1")
+        port = item.get("port", 8001)
+
+        if dtype == "VX600_PRO":
+            status = novastar_vx600.get_status(ip, port)
+            item["telemetry"] = status
+            item["active_preset"] = status.get("active_preset", item.get("active_preset"))
+            item["preset_info"] = status.get("preset_info")
+        elif dtype == "TB40":
+            status = novastar_controller.get_status(ip, port)
+            item["telemetry"] = status
+        elif dtype == "SHELLY_PRO":
+            status = shelly_controller.get_status(ip)
+            item["telemetry"] = status
+        elif dtype == "HYBRID":
+            vx_status = novastar_vx600.get_status(ip, 6000)
+            tb_status = novastar_controller.get_status(ip, port)
+            item["telemetry"] = {"vx600": vx_status, "tb40": tb_status}
+            item["active_preset"] = vx_status.get("active_preset")
+            item["preset_info"] = vx_status.get("preset_info")
+        else:
+            item["telemetry"] = {"connected": True}
+
+        enriched.append(item)
+    return JSONResponse({
+        "status": "ok",
+        "devices": enriched,
+        "presets_catalog": novastar_vx600.get_presets()
+    })
+
+
+class DeviceCreate(BaseModel):
+    id: str
+    location_id: str
+    name: str
+    device_type: str  # 'TB40', 'VX600_PRO', 'HYBRID', 'SHELLY_PRO'
+    ip_address: str
+    port: Optional[int] = 8001
+    dual_screen_enabled: Optional[bool] = False
+    active_preset: Optional[str] = "preset_mirror_1tb40"
+    input_source_1: Optional[str] = "TB40_MASTER"
+    input_source_2: Optional[str] = ""
+    notes: Optional[str] = ""
+
+@app.post("/api/admin/devices", summary="Alta de nuevo dispositivo o controlador")
+async def api_admin_add_device(req: DeviceCreate) -> JSONResponse:
+    did = database.add_hardware_device(
+        device_id=req.id,
+        location_id=req.location_id,
+        name=req.name,
+        device_type=req.device_type,
+        ip_address=req.ip_address,
+        port=req.port or (6000 if req.device_type == "VX600_PRO" else 8001),
+        dual_screen_enabled=1 if req.dual_screen_enabled else 0,
+        active_preset=req.active_preset or "preset_mirror_1tb40",
+        input_source_1=req.input_source_1 or "TB40_MASTER",
+        input_source_2=req.input_source_2 or "",
+        notes=req.notes or ""
+    )
+    if req.device_type in ("VX600_PRO", "HYBRID") and req.active_preset:
+        novastar_vx600.apply_preset(req.ip_address, req.active_preset, req.port or 6000)
+
+    logger.info(f"[ADMIN-DEVICE] Dispositivo registrado: '{did}' ({req.device_type}) en {req.ip_address}")
+    return JSONResponse({"status": "ok", "device_id": did, "message": "Dispositivo registrado exitosamente."})
+
+
+@app.delete("/api/admin/devices/{device_id}", summary="Eliminar dispositivo de hardware")
+async def api_admin_delete_device(device_id: str) -> JSONResponse:
+    res = database.delete_hardware_device(device_id)
+    if not res:
+        raise HTTPException(status_code=404, detail="Dispositivo no encontrado.")
+    return JSONResponse({"status": "ok", "message": f"Dispositivo '{device_id}' eliminado."})
+
+
+class PresetChangeRequest(BaseModel):
+    preset_id: str
+
+@app.post("/api/admin/devices/{device_id}/preset", summary="Cambiar preset de hardware en VX600 Pro")
+async def api_admin_set_preset(device_id: str, req: PresetChangeRequest) -> JSONResponse:
+    device = database.get_hardware_device(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Dispositivo no encontrado.")
+    
+    res = novastar_vx600.apply_preset(
+        ip=device["ip_address"],
+        preset_id=req.preset_id,
+        port=device["port"] if device["port"] != 8001 else 6000
+    )
+    database.update_hardware_device_preset(device_id, req.preset_id)
+    logger.info(f"[VX600] Preset '{req.preset_id}' asignado al dispositivo '{device_id}'")
+    return JSONResponse({"status": "ok", "device_id": device_id, "applied": res})
+
+
+@app.get("/api/vx600/presets", summary="Catálogo de presets del procesador NovaStar VX600 Pro")
+async def api_vx600_presets() -> JSONResponse:
+    return JSONResponse({"status": "ok", "presets": novastar_vx600.get_presets()})
+
+
+@app.get("/api/vx600/status", summary="Consulta de estado de procesador NovaStar VX600 Pro")
+async def api_vx600_status(ip: str = "192.168.1.160", port: int = 6000) -> JSONResponse:
+    status = novastar_vx600.get_status(ip, port)
+    return JSONResponse(status)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REPORTE EJECUTIVO PDF / IMPRESIÓN (APEX COMPANY)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/report/print", response_class=HTMLResponse, summary="Generador de Reporte Ejecutivo PDF Imprimible")
+async def report_print_view(
+    client_id: Optional[str] = Query(None, description="ID del cliente"),
+    campaign_id: Optional[str] = Query(None, description="ID de la campaña"),
+    location_id: Optional[str] = Query("loc_minerva", description="ID de la ubicación")
+) -> HTMLResponse:
+    """
+    Genera un informe ejecutivo imprimible en formato HTML estilizado con @media print
+    para exportar directamente a PDF desde el navegador (Ctrl + P / Imprimir a PDF).
+    Incluye el logotipo del cliente, sello de ingeniería de Apex Company, aforo vehicular,
+    energía consumida (Shelly Pro) y el pie de página de apexcompany.com.mx.
+    """
+    # 1. Obtener cliente
+    client = None
+    if client_id and client_id != "all":
+        client = database.get_client(client_id)
+    if not client:
+        clients = database.get_clients()
+        client = clients[0] if clients else {
+            "id": "cli_default",
+            "name": "Cliente Comercial DOOH",
+            "logo_url": "/static/uploads/logos/default_cerveceria.svg",
+            "contact_email": "contacto@cliente.com"
+        }
+
+    # 2. Obtener ubicación y dispositivos
+    loc = database.get_location(location_id) or {
+        "id": "loc_minerva",
+        "name": "Ubicación 01 — Glorieta Minerva",
+        "address": "Av. Vallarta y López Mateos, Guadalajara",
+        "screen_area_m2": 32.0,
+        "cost_per_kwh": 3.85,
+        "shelly_ip": "192.168.1.150"
+    }
+    devices = database.get_hardware_devices(loc["id"])
+
+    # 3. Métricas de tráfico y KPIs
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    kpis = database.get_kpis(date_str=today)
+    hourly_data = database.get_hourly_metrics(date_str=today)
+    classes_dict = kpis.get("vehicle_classes", {})
+    types_breakdown = [{"type": k, "count": v} for k, v in classes_dict.items()]
+
+    # 4. Telemetría de energía Shelly Pro
+    shelly_data = shelly_controller.get_status(loc.get("shelly_ip", "192.168.1.150"))
+    
+    # Cálculos acumulados
+    total_veh = kpis.get("total_flow", 0)
+    total_in = kpis.get("total_in", 0)
+    total_out = kpis.get("total_out", 0)
+    impressions = int(total_veh * 1.6)   # Estimación estándar: 1.6 ocupantes promedio por vehículo
+    avg_dwell = kpis.get("avg_dwell_seconds", 8.4)
+    peak_hr = kpis.get("peak_hour", "18:00 - 19:00")
+    
+    # Energía
+    power_kw = shelly_data.get("power_kw", 4.2)
+    daily_kwh = round(power_kw * 16.5, 2)
+    energy_cost = round(daily_kwh * loc.get("cost_per_kwh", 3.85), 2)
+
+    # Generar barras SVG para la gráfica horaria
+    chart_bars = ""
+    max_count = max([h.get("count", 0) for h in hourly_data], default=100) or 1
+    for h in hourly_data:
+        hr_str = h.get("hour", "00:00")
+        try:
+            hr_num = int(hr_str.split(":")[0])
+        except Exception:
+            hr_num = 0
+        cnt = h.get("count", 0)
+        height = int((cnt / max_count) * 110)
+        y = 120 - height
+        x = 35 + (hr_num * 27)
+        chart_bars += f"""
+        <g>
+          <rect x="{x}" y="{y}" width="18" height="{height}" fill="#0284c7" rx="3" opacity="0.85"/>
+          <text x="{x + 9}" y="135" font-size="8" fill="#64748b" text-anchor="middle">{hr_num:02d}</text>
+        </g>
+        """
+
+    # Filas de dispositivos de hardware
+    device_rows = ""
+    for d in devices:
+        dual_text = "Sí (Cara A + Cara B)" if d.get("dual_screen_enabled") else "Pantalla Simple"
+        preset_desc = d.get("active_preset", "preset_single_tb40")
+        if preset_desc == "preset_mirror_1tb40":
+            preset_desc = "Preset 1: 1x TB40 Espejo (Unificado en 2 Caras)"
+        elif preset_desc == "preset_dual_2tb40":
+            preset_desc = "Preset 2: 2x TB40 Contenido Dual Independiente"
+        elif preset_desc == "preset_pip_promo":
+            preset_desc = "Preset 3: PIP Multiventana Promocional"
+
+        device_rows += f"""
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding: 8px 10px; font-weight: bold; color: #1e293b;">{d.get('name')}</td>
+          <td style="padding: 8px 10px; color: #475569;"><span style="background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">{d.get('device_type')}</span></td>
+          <td style="padding: 8px 10px; font-family: monospace; color: #334155;">{d.get('ip_address')}:{d.get('port')}</td>
+          <td style="padding: 8px 10px; color: #475569;">{dual_text}</td>
+          <td style="padding: 8px 10px; font-size: 11px; color: #0284c7; font-weight: 600;">{preset_desc}</td>
+        </tr>
+        """
+    if not device_rows:
+        device_rows = """<tr><td colspan="5" style="padding: 12px; text-align: center; color: #94a3b8;">Sin controladores registrados</td></tr>"""
+
+    # Filas de desglose vehicular
+    veh_rows = ""
+    for v in types_breakdown:
+        pct = round((v["count"] / max(1, total_veh)) * 100, 1)
+        veh_rows += f"""
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dashed #cbd5e1; font-size: 12px;">
+          <span style="font-weight: 600; color: #1e293b;">{v['type']}</span>
+          <span style="color: #475569;"><strong style="color: #0f172a;">{v['count']:,}</strong> veh ({pct}%)</span>
+        </div>
+        """
+
+    client_logo = client.get("logo_url") or "/static/uploads/logos/default_cerveceria.svg"
+
+    html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Reporte Ejecutivo DOOH — {client.get('name', 'Cliente')} — Apex Company</title>
+  <style>
+    @page {{
+      size: A4 portrait;
+      margin: 12mm 15mm 15mm 15mm;
+    }}
+    * {{ box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }}
+    body {{
+      background: #ffffff;
+      color: #0f172a;
+      margin: 0;
+      padding: 20px;
+      font-size: 13px;
+      line-height: 1.4;
+    }}
+    .no-print {{
+      background: #0f172a;
+      color: #ffffff;
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+    }}
+    .btn {{
+      background: #0284c7;
+      color: #ffffff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 13px;
+    }}
+    .btn:hover {{ background: #0369a1; }}
+    @media print {{
+      .no-print {{ display: none !important; }}
+      body {{ padding: 0; }}
+      .page-footer {{ position: fixed; bottom: 0; left: 0; right: 0; }}
+    }}
+    .header-table {{
+      width: 100%;
+      border-bottom: 2px solid #0284c7;
+      padding-bottom: 14px;
+      margin-bottom: 16px;
+    }}
+    .kpi-grid {{
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 18px;
+    }}
+    .kpi-card {{
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      text-align: center;
+    }}
+    .kpi-card .val {{
+      font-size: 20px;
+      font-weight: 800;
+      color: #0369a1;
+      margin-top: 4px;
+    }}
+    .kpi-card .lbl {{
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #64748b;
+      letter-spacing: 0.5px;
+    }}
+    .section-title {{
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      color: #0f172a;
+      border-left: 4px solid #0284c7;
+      padding-left: 8px;
+      margin: 16px 0 10px 0;
+      letter-spacing: 0.5px;
+    }}
+    table.data-table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      margin-bottom: 16px;
+    }}
+    table.data-table th {{
+      background: #f1f5f9;
+      color: #334155;
+      text-align: left;
+      padding: 6px 10px;
+      font-weight: 700;
+      border-bottom: 2px solid #cbd5e1;
+    }}
+    .footer-watermark {{
+      margin-top: 30px;
+      border-top: 1px solid #cbd5e1;
+      padding-top: 12px;
+      text-align: center;
+      font-size: 10px;
+      color: #64748b;
+    }}
+    .footer-watermark strong {{
+      color: #0284c7;
+      font-size: 11px;
+    }}
+  </style>
+</head>
+<body>
+
+  <!-- Barra de control en pantalla (Oculta al imprimir) -->
+  <div class="no-print">
+    <div>
+      <strong style="color: #38bdf8; font-size: 14px;">Vista Previa de Reporte Ejecutivo DOOH</strong>
+      <span style="color: #94a3b8; font-size: 12px; margin-left: 8px;">Listo para impresión directa o guardar como PDF</span>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button onclick="window.print()" class="btn">Imprimir / Guardar PDF</button>
+      <button onclick="window.close()" class="btn" style="background: #334155;">Cerrar</button>
+    </div>
+  </div>
+
+  <!-- Encabezado con Logotipo del Cliente y Marca Apex Company -->
+  <table class="header-table">
+    <tr>
+      <td style="width: 50%; vertical-align: middle;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <img src="{client_logo}" alt="{client.get('name')}" style="max-height: 48px; max-width: 180px; object-fit: contain;" onerror="this.style.display='none'" />
+          <div>
+            <h1 style="font-size: 17px; margin: 0; color: #0f172a; font-weight: 800;">{client.get('name')}</h1>
+            <p style="margin: 2px 0 0 0; font-size: 11px; color: #64748b;">Reporte de Aforo Vehicular, Audiencia e Impactos DOOH</p>
+          </div>
+        </div>
+      </td>
+      <td style="width: 50%; text-align: right; vertical-align: middle;">
+        <div style="display: inline-block; text-align: right;">
+          <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
+            <div style="text-align: right;">
+              <span style="font-size: 13px; font-weight: 900; color: #0284c7; letter-spacing: 0.5px;">APEX COMPANY</span>
+              <div style="font-size: 9px; color: #64748b; font-weight: 600;">apexcompany.com.mx</div>
+            </div>
+            <div style="width: 28px; height: 28px; background: #0284c7; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 15px;">A</div>
+          </div>
+          <div style="margin-top: 4px; font-size: 10px; color: #475569;">
+            Fecha: <strong>{today}</strong> | Sitio: <strong>{loc.get('name')}</strong>
+          </div>
+        </div>
+      </td>
+    </tr>
+  </table>
+
+  <!-- Ficha Técnica -->
+  <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-size: 11px;">
+    <div><strong>Ubicación:</strong> {loc.get('name')}</div>
+    <div><strong>Área de Pantalla:</strong> {loc.get('screen_area_m2')} m² LED Exterior</div>
+    <div><strong>Orientación:</strong> {loc.get('screen_orientation_deg', 270)}° Azimut</div>
+    <div><strong>Contacto Cliente:</strong> {client.get('contact_email', 'N/A')}</div>
+    <div><strong>ID Auditoría:</strong> DOOH-{int(time.time())}</div>
+    <div><strong>Controlador:</strong> NovaStar TB40 / VX600 Pro + Shelly Pro</div>
+  </div>
+
+  <!-- Métricas Principales (KPIs) -->
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="lbl">Aforo Vehicular Total</div>
+      <div class="val">{total_veh:,}</div>
+      <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Cruce validado con IA</div>
+    </div>
+    <div class="kpi-card">
+      <div class="lbl">Impactos Estimados</div>
+      <div class="val" style="color: #059669;">{impressions:,}</div>
+      <div style="font-size: 10px; color: #64748b; margin-top: 2px;">1.6 ocupantes / veh.</div>
+    </div>
+    <div class="kpi-card">
+      <div class="lbl">Tiempo en Escena</div>
+      <div class="val" style="color: #d97706;">{avg_dwell} seg</div>
+      <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Visibilidad de pantalla</div>
+    </div>
+    <div class="kpi-card">
+      <div class="lbl">Hora Pico Máxima</div>
+      <div class="val" style="font-size: 16px; color: #7c3aed; margin-top: 6px;">{peak_hr}</div>
+      <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Mayor concentración</div>
+    </div>
+  </div>
+
+  <!-- Tabla de Controladores NovaStar y Presets -->
+  <div class="section-title">Infraestructura y Controladores de Pantalla (NovaStar & Shelly Pro)</div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Dispositivo / Nombre</th>
+        <th>Tipo</th>
+        <th>Dirección IP / Puerto</th>
+        <th>Modo Pantalla</th>
+        <th>Preset Activo de Hardware</th>
+      </tr>
+    </thead>
+    <tbody>
+      {device_rows}
+    </tbody>
+  </table>
+
+  <!-- Gráfica de Tráfico y Desglose por Tipo de Vehículo -->
+  <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px;">
+    <div>
+      <div class="section-title">Curva de Flujo Horario de Tráfico (24 Horas)</div>
+      <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; background: #fafafa;">
+        <svg viewBox="0 0 700 145" style="width: 100%; height: auto;">
+          <line x1="20" y1="120" x2="680" y2="120" stroke="#cbd5e1" stroke-width="1" />
+          <line x1="20" y1="65" x2="680" y2="65" stroke="#f1f5f9" stroke-dasharray="4 4" stroke-width="1" />
+          {chart_bars}
+        </svg>
+      </div>
+    </div>
+    <div>
+      <div class="section-title">Composición del Tráfico</div>
+      <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; background: #fafafa;">
+        {veh_rows}
+      </div>
+    </div>
+  </div>
+
+  <!-- Auditoría Energética Shelly Pro -->
+  <div class="section-title">Auditoría Energética de Pantalla (Shelly Pro 4PM)</div>
+  <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 12px 16px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; font-size: 11px;">
+    <div>
+      <span style="color: #166534; font-weight: bold; display: block;">Potencia Activa Actual:</span>
+      <span style="font-size: 16px; font-weight: 800; color: #15803d;">{power_kw} kW</span>
+    </div>
+    <div>
+      <span style="color: #166534; font-weight: bold; display: block;">Energía Diaria Consumida:</span>
+      <span style="font-size: 16px; font-weight: 800; color: #15803d;">{daily_kwh} kWh</span>
+    </div>
+    <div>
+      <span style="color: #166534; font-weight: bold; display: block;">Costo Eléctrico Estimado:</span>
+      <span style="font-size: 16px; font-weight: 800; color: #15803d;">${energy_cost:,.2f} MXN</span>
+    </div>
+    <div>
+      <span style="color: #166534; font-weight: bold; display: block;">Regulación Solar de Brillo:</span>
+      <span style="font-size: 13px; font-weight: 800; color: #0284c7;">Calibrado Autónomo</span>
+    </div>
+  </div>
+
+  <!-- Pie de página Oficial y Obligatorio -->
+  <div class="footer-watermark">
+    <p style="margin: 0 0 4px 0; font-size: 11px; font-weight: bold; color: #0f172a;">
+      Tecnología y Plataforma Desarrollada por <strong>apexcompany.com.mx</strong>
+    </p>
+    <p style="margin: 0; color: #64748b;">
+      Soluciones Avanzadas de Visión Artificial, Analítica Vehicular e Infraestructura Publicitaria DOOH. Todos los derechos reservados.
+    </p>
+  </div>
+
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PUNTO DE ENTRADA
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 if __name__ == "__main__":
     uvicorn.run(

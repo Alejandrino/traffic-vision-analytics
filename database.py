@@ -108,6 +108,48 @@ def init_db() -> None:
                 raw_summary TEXT
             )
         """)
+
+        # ── TABLA DE CLIENTES Y MARCAS PUBLICITARIAS ─────────────────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS clients (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                contact_email TEXT,
+                logo_url TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # ── TABLA DE ASOCIACIÓN CLIENTE ↔ PANTALLAS / UBICACIONES ────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS client_locations (
+                client_id TEXT NOT NULL,
+                location_id TEXT NOT NULL,
+                PRIMARY KEY (client_id, location_id),
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+                FOREIGN KEY (location_id) REFERENCES locations(id) ON DELETE CASCADE
+            )
+        """)
+
+        # ── TABLA DE CONTROLADORES Y DISPOSITIVOS (TB40 / VX600 PRO / SHELLY) ──
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS hardware_devices (
+                id TEXT PRIMARY KEY,
+                location_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                device_type TEXT NOT NULL,   -- 'TB40', 'VX600_PRO', 'HYBRID', 'SHELLY_PRO'
+                ip_address TEXT NOT NULL,
+                port INTEGER DEFAULT 8001,
+                dual_screen_enabled INTEGER DEFAULT 0,
+                active_preset TEXT DEFAULT 'preset_mirror_1tb40',
+                input_source_1 TEXT DEFAULT 'TB40_MASTER',
+                input_source_2 TEXT DEFAULT 'TB40_SLAVE',
+                status TEXT DEFAULT 'online',
+                notes TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (location_id) REFERENCES locations(id) ON DELETE CASCADE
+            )
+        """)
         conn.commit()
 
     # Si la base de datos está vacía, generar datos de muestra para pruebas y demostración ejecutiva
@@ -454,6 +496,42 @@ def seed_sample_data_if_empty() -> None:
             """, (start_d, end_d, start_d, end_d, start_d, end_d))
             conn.commit()
 
+        # Sembrar clientes de muestra si no existen
+        cursor.execute("SELECT COUNT(*) as count FROM clients")
+        if cursor.fetchone()["count"] == 0:
+            cursor.execute("""
+                INSERT INTO clients (id, name, contact_email, logo_url)
+                VALUES 
+                ('cli_cerveceria', 'Cervecería Cuauhtémoc Moctezuma', 'marketing@heineken.com.mx', '/static/uploads/logos/default_cerveceria.svg'),
+                ('cli_banco', 'Banco Azteca', 'publicidad@bancoazteca.com.mx', '/static/uploads/logos/default_banco.svg'),
+                ('cli_retail', 'Liverpool México', 'dooh@liverpool.com.mx', '/static/uploads/logos/default_retail.svg'),
+                ('cli_nissan', 'Nissan México', 'marcas@nissan.com.mx', '/static/uploads/logos/default_automotriz.svg')
+            """)
+            cursor.execute("""
+                INSERT OR IGNORE INTO client_locations (client_id, location_id)
+                VALUES 
+                ('cli_cerveceria', 'loc_minerva'),
+                ('cli_cerveceria', 'loc_periferico'),
+                ('cli_banco', 'loc_periferico'),
+                ('cli_retail', 'loc_minerva'),
+                ('cli_nissan', 'loc_minerva'),
+                ('cli_nissan', 'loc_periferico')
+            """)
+            conn.commit()
+
+        # Sembrar controladores y procesadores de hardware si no existen
+        cursor.execute("SELECT COUNT(*) as count FROM hardware_devices")
+        if cursor.fetchone()["count"] == 0:
+            cursor.execute("""
+                INSERT INTO hardware_devices (id, location_id, name, device_type, ip_address, port, dual_screen_enabled, active_preset, input_source_1, input_source_2, notes)
+                VALUES 
+                ('dev_tb40_minerva', 'loc_minerva', 'NovaStar TB40 Maestro — Minerva', 'TB40', '192.168.1.140', 8001, 0, 'preset_single_tb40', 'TB40_MASTER', '', 'Reproductor multimedia primario para pantalla exterior'),
+                ('dev_vx600_periferico', 'loc_periferico', 'NovaStar VX600 Pro — Periférico Sur (2 Caras)', 'VX600_PRO', '192.168.1.160', 6000, 1, 'preset_mirror_1tb40', 'HDMI-1 (TB40-A)', 'HDMI-2 (TB40-B)', 'Controlador y escalador para espectacular bipolar Cara A y Cara B'),
+                ('dev_shelly_minerva', 'loc_minerva', 'Shelly Pro 4PM — Minerva', 'SHELLY_PRO', '192.168.1.150', 80, 0, '', '', '', 'Monitoreo de energía eléctrica, potencia kW y encendido remoto'),
+                ('dev_shelly_periferico', 'loc_periferico', 'Shelly Pro 4PM — Periférico', 'SHELLY_PRO', '192.168.1.151', 80, 0, '', '', '', 'Medición de consumo kWh y encendido de pantalla')
+            """)
+            conn.commit()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FUNCIONES DE GESTIÓN MULTI-UBICACIÓN Y CAMPAÑAS
@@ -588,4 +666,163 @@ def record_edge_sync(
         """, (node_id, location_id, date_reported, total_vehicles, total_in, total_out, peak_hour, raw_summary))
         conn.commit()
         return cursor.lastrowid or 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GESTIÓN MULTI-CLIENTE Y LOGOTIPOS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_clients() -> list[dict[str, Any]]:
+    """Obtiene todos los clientes registrados junto con sus ubicaciones asignadas."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM clients ORDER BY name ASC")
+        clients = [dict(r) for r in cursor.fetchall()]
+        for c in clients:
+            cursor.execute("""
+                SELECT l.* FROM locations l
+                JOIN client_locations cl ON l.id = cl.location_id
+                WHERE cl.client_id = ?
+            """, (c["id"],))
+            c["locations"] = [dict(loc) for loc in cursor.fetchall()]
+        return clients
+
+def get_client(client_id: str) -> Optional[dict[str, Any]]:
+    """Obtiene los datos de un cliente por su ID."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM clients WHERE id = ?", (client_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        c = dict(row)
+        cursor.execute("""
+            SELECT l.* FROM locations l
+            JOIN client_locations cl ON l.id = cl.location_id
+            WHERE cl.client_id = ?
+        """, (client_id,))
+        c["locations"] = [dict(loc) for loc in cursor.fetchall()]
+        return c
+
+def add_client(client_id: str, name: str, contact_email: str = "", logo_url: str = "") -> str:
+    """Registra o actualiza un cliente comercial."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO clients (id, name, contact_email, logo_url)
+            VALUES (?, ?, ?, ?)
+        """, (client_id, name, contact_email, logo_url))
+        conn.commit()
+        return client_id
+
+def update_client_logo(client_id: str, logo_url: str) -> bool:
+    """Actualiza la URL o ruta del logotipo del cliente."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE clients SET logo_url = ? WHERE id = ?", (logo_url, client_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+def assign_client_location(client_id: str, location_id: str) -> bool:
+    """Asocia una pantalla/ubicación a un cliente."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR IGNORE INTO client_locations (client_id, location_id)
+            VALUES (?, ?)
+        """, (client_id, location_id))
+        conn.commit()
+        return True
+
+def get_client_screens(client_id: str) -> list[dict[str, Any]]:
+    """Devuelve las ubicaciones y pantallas autorizadas para un cliente."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT l.* FROM locations l
+            JOIN client_locations cl ON l.id = cl.location_id
+            WHERE cl.client_id = ? AND l.is_active = 1
+            ORDER BY l.name ASC
+        """, (client_id,))
+        return [dict(r) for r in cursor.fetchall()]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GESTIÓN DE DISPOSITIVOS DE HARDWARE (TB40 / VX600 PRO / SHELLY)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_hardware_devices(location_id: Optional[str] = None) -> list[dict[str, Any]]:
+    """Lista los dispositivos de hardware registrados, opcionalmente filtrados por ubicación."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        if location_id and location_id != "all":
+            cursor.execute("""
+                SELECT d.*, l.name as location_name 
+                FROM hardware_devices d
+                JOIN locations l ON d.location_id = l.id
+                WHERE d.location_id = ?
+                ORDER BY d.created_at DESC
+            """, (location_id,))
+        else:
+            cursor.execute("""
+                SELECT d.*, l.name as location_name 
+                FROM hardware_devices d
+                JOIN locations l ON d.location_id = l.id
+                ORDER BY d.created_at DESC
+            """)
+        return [dict(r) for r in cursor.fetchall()]
+
+def get_hardware_device(device_id: str) -> Optional[dict[str, Any]]:
+    """Obtiene el detalle de un dispositivo por su ID."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT d.*, l.name as location_name 
+            FROM hardware_devices d
+            JOIN locations l ON d.location_id = l.id
+            WHERE d.id = ?
+        """, (device_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+def add_hardware_device(
+    device_id: str,
+    location_id: str,
+    name: str,
+    device_type: str,
+    ip_address: str,
+    port: int = 8001,
+    dual_screen_enabled: int = 0,
+    active_preset: str = "preset_mirror_1tb40",
+    input_source_1: str = "TB40_MASTER",
+    input_source_2: str = "",
+    notes: str = ""
+) -> str:
+    """Registra o actualiza un dispositivo de hardware en la base de datos."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO hardware_devices 
+            (id, location_id, name, device_type, ip_address, port, dual_screen_enabled, active_preset, input_source_1, input_source_2, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (device_id, location_id, name, device_type, ip_address, port, dual_screen_enabled, active_preset, input_source_1, input_source_2, notes))
+        conn.commit()
+        return device_id
+
+def update_hardware_device_preset(device_id: str, preset_id: str) -> bool:
+    """Actualiza el preset activo de un procesador de video (VX600 Pro)."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE hardware_devices SET active_preset = ? WHERE id = ?", (preset_id, device_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+def delete_hardware_device(device_id: str) -> bool:
+    """Elimina un dispositivo de hardware del registro."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM hardware_devices WHERE id = ?", (device_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
 
