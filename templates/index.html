@@ -1,13 +1,18 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" class="h-full">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Traffic Vision Analytics</title>
-  <meta name="description" content="Dashboard de analitica de trafico vehicular multicamara en tiempo real." />
+  <title>Sistema de Gestión y Aforo Vehicular — Plataforma de Movilidad</title>
+  <meta name="description" content="Plataforma corporativa de auditoría de tráfico vehicular, aforo multicámara y analítica histórica para toma de decisiones." />
+  
+  <!-- Tailwind CSS & Google Fonts -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  
+  <!-- Chart.js para visualización de analítica histórica -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <script>
     tailwind.config = {
@@ -15,10 +20,24 @@
         extend: {
           fontFamily: { sans: ['Inter', 'sans-serif'] },
           colors: {
-            surface: { 50:'#f0f4ff', 100:'#e0e9ff', 900:'#070c1a', 800:'#0d1530', 750:'#0f1a38', 700:'#111c40', 600:'#1a2755' },
-            accent:  { DEFAULT:'#3b82f6', light:'#60a5fa', dark:'#1d4ed8' },
-            success: '#22c55e', warn: '#f59e0b', danger: '#ef4444',
-            lead:    '#a78bfa', bounce: '#fb923c',
+            brand: {
+              50: '#f8fafc',
+              100: '#f1f5f9',
+              200: '#e2e8f0',
+              700: '#334155',
+              800: '#1e293b',
+              850: '#172033',
+              900: '#0f172a',
+              950: '#0a0f1d',
+            },
+            primary: {
+              DEFAULT: '#2563eb', // Sapphire Blue corporativo
+              hover: '#1d4ed8',
+              light: '#3b82f6',
+            },
+            flowIn: '#10b981',   // Emerald para entradas
+            flowOut: '#f59e0b',  // Amber para salidas
+            danger: '#ef4444',
           },
         },
       },
@@ -26,894 +45,1004 @@
   </script>
 
   <style>
-    :root { --sidebar-w: 280px; }
     * { box-sizing: border-box; }
-    ::-webkit-scrollbar { width:5px; height:5px; }
-    ::-webkit-scrollbar-track { background:#070c1a; }
-    ::-webkit-scrollbar-thumb { background:#1a2755; border-radius:4px; }
+    body { font-family: 'Inter', sans-serif; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
 
-    body { font-family:'Inter',sans-serif; background:#070c1a; color:#e2e8f0; margin:0; overflow:hidden; height:100vh; display:flex; flex-direction:column; }
-
-    /* GLASS */
-    .glass { background:rgba(13,21,48,0.65); backdrop-filter:blur(14px); border:1px solid rgba(59,130,246,0.12); }
-
-    /* SIDEBAR */
-    #sidebar {
-      width: var(--sidebar-w);
-      min-width: var(--sidebar-w);
-      background: #0d1530;
-      border-right: 1px solid rgba(59,130,246,0.15);
-      display: flex; flex-direction: column;
-      overflow-y: auto;
-      transition: width 0.3s ease, min-width 0.3s ease;
-      position: relative; z-index: 20;
-    }
-    #sidebar.collapsed { width:64px; min-width:64px; }
-    #sidebar.collapsed .sidebar-label { opacity:0; pointer-events:none; width:0; overflow:hidden; }
-    #sidebar.collapsed .sidebar-header-text { display:none; }
-
-    /* CAM CARD en sidebar */
-    .cam-chip {
-      display: flex; align-items: center; gap:10px;
-      padding: 10px 12px; border-radius:10px; cursor:pointer;
-      border: 1px solid transparent;
+    .nav-tab {
       transition: all 0.2s ease;
-      position: relative;
+      border-bottom: 2px solid transparent;
     }
-    .cam-chip:hover { background:rgba(59,130,246,0.1); border-color:rgba(59,130,246,0.25); }
-    .cam-chip.active { background:rgba(59,130,246,0.18); border-color:rgba(59,130,246,0.5); }
-    .cam-chip.active .chip-icon { background:#3b82f6; }
-    .chip-icon {
-      width:36px; height:36px; border-radius:8px;
-      background:#1a2755; display:flex; align-items:center; justify-content:center;
-      font-size:14px; font-weight:700; color:#93c5fd; flex-shrink:0;
-      transition:background 0.2s;
-    }
-    .cam-status-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
-
-    /* LAYOUT PRINCIPAL */
-    #app { display:flex; flex:1; overflow:hidden; }
-    #content { flex:1; display:flex; flex-direction:column; overflow:hidden; }
-
-    /* GRID DE FEEDS */
-    #feed-grid {
-      flex:1; display:grid; gap:12px; padding:12px; overflow:hidden;
-      grid-template-columns: 1fr;
-      align-items: stretch;
-    }
-    #feed-grid.cols-2 { grid-template-columns: 1fr 1fr; }
-    #feed-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
-
-    /* FEED CARD */
-    .feed-card {
-      position:relative; background:#0d1530; border-radius:14px;
-      border:1px solid rgba(59,130,246,0.15); overflow:hidden;
-      display:flex; flex-direction:column;
-      transition: border-color 0.3s ease;
-    }
-    .feed-card.selected-focus { border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,0.3); }
-    .feed-card-header {
-      padding:8px 12px; background:#0f1a38;
-      border-bottom:1px solid rgba(59,130,246,0.1);
-      display:flex; align-items:center; justify-content:between; gap:8px;
-      flex-shrink:0;
-    }
-    .feed-video-wrap { flex:1; position:relative; background:#040810; min-height:0; }
-    .feed-video-wrap img { width:100%; height:100%; object-fit:cover; display:block; }
-    .feed-metrics-bar {
-      display:grid; grid-template-columns:repeat(4,1fr);
-      gap:6px; padding:8px 10px;
-      background:#070c1a; border-top:1px solid rgba(59,130,246,0.08);
-      flex-shrink:0;
-    }
-    .metric-pill { text-align:center; }
-    .metric-pill .val { font-size:1.3rem; font-weight:800; line-height:1; }
-    .metric-pill .lbl { font-size:0.6rem; color:#64748b; letter-spacing:0.05em; text-transform:uppercase; margin-top:2px; }
-
-    /* CHIP de clase vehiculo */
-    .class-chip { font-size:0.65rem; padding:2px 7px; border-radius:20px; font-weight:600; }
-
-    /* OVERLAY de sin señal */
-    .no-signal-overlay {
-      position:absolute; inset:0; display:flex; flex-direction:column;
-      align-items:center; justify-content:center; gap:8px;
-      background:#040810; color:#1e3a5f;
+    .nav-tab.active {
+      color: #3b82f6;
+      border-bottom-color: #3b82f6;
+      background: rgba(37, 99, 235, 0.08);
     }
 
-    /* ANIMACIONES */
-    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.3} }
-    .pulse { animation: pulse-dot 1.8s ease-in-out infinite; }
-    @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
-    .fade-in { animation: fadeIn 0.35s ease-out forwards; }
-    .val-flash { transition:color 0.4s ease,transform 0.4s ease; }
-    .val-flash.bump { color:#60a5fa !important; transform:scale(1.12); }
-
-    /* KPI globales top bar */
-    #topbar { flex-shrink:0; display:flex; align-items:center; gap:8px; padding:8px 14px; background:#0d1530; border-bottom:1px solid rgba(59,130,246,0.12); flex-wrap:wrap; }
-    .kpi-badge { display:flex; align-items:center; gap:6px; padding:5px 12px; border-radius:20px; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.15); font-size:0.78rem; }
-    .kpi-badge .kv { font-weight:700; font-size:1rem; }
-
-    /* HEADER */
-    #header { flex-shrink:0; display:flex; align-items:center; gap:12px; padding:10px 16px; background:#0d1530; border-bottom:1px solid rgba(59,130,246,0.18); z-index:30; }
+    /* Estilos de Impresión Formal para Informe PDF */
+    @media print {
+      body { background: #ffffff !important; color: #0f172a !important; }
+      #app-nav, #sidebar-stream-controls, .no-print, button, .tab-btn { display: none !important; }
+      #tab-analytics, #tab-events { display: block !important; }
+      .print-only { display: block !important; }
+      .card-box {
+        background: #ffffff !important;
+        border: 1px solid #cbd5e1 !important;
+        color: #0f172a !important;
+        box-shadow: none !important;
+      }
+      .text-white { color: #0f172a !important; }
+      .text-gray-400, .text-gray-300 { color: #475569 !important; }
+    }
+    .print-only { display: none; }
   </style>
 </head>
-<body>
 
-<!-- ══ HEADER ══════════════════════════════════════════════════════════════ -->
-<header id="header">
-  <!-- Burger -->
-  <button id="burger-btn" onclick="toggleSidebar()"
-    class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 transition-colors flex-shrink-0">
-    <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
-    </svg>
-  </button>
+<body class="h-full bg-brand-950 text-slate-100 flex flex-col antialiased overflow-hidden">
 
-  <!-- Logo -->
-  <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-700 flex items-center justify-center flex-shrink-0">
-    <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-        d="M15 10l4.553-2.069A1 1 0 0121 8.82V15.18a1 1 0 01-1.447.89L15 14M3 8h12a2 2 0 012 2v4a2 2 0 01-2 2H3a2 2 0 01-2-2v-4a2 2 0 012-2z"/>
-    </svg>
-  </div>
-  <div class="flex-1 min-w-0">
-    <h1 class="text-sm font-bold text-white leading-none">Traffic Vision Analytics</h1>
-    <p class="text-xs text-blue-400 mt-0.5">YOLOv8 · ByteTrack · OpenVINO</p>
-  </div>
-
-  <!-- Layout picker -->
-  <div class="flex items-center gap-1.5 ml-auto">
-    <span class="text-xs text-gray-500 hidden sm:block">Vista:</span>
-    <button onclick="setLayout(1)" id="layout-1"
-      class="layout-btn px-2.5 py-1 text-xs rounded-md bg-blue-600 text-white">1</button>
-    <button onclick="setLayout(2)" id="layout-2"
-      class="layout-btn px-2.5 py-1 text-xs rounded-md bg-surface-700 text-gray-400 hover:bg-surface-600">2</button>
-    <button onclick="setLayout(3)" id="layout-3"
-      class="layout-btn px-2.5 py-1 text-xs rounded-md bg-surface-700 text-gray-400 hover:bg-surface-600">3</button>
-  </div>
-
-  <!-- WS status -->
-  <div id="ws-badge" class="flex items-center gap-1.5 px-3 py-1 rounded-full glass text-xs ml-2 flex-shrink-0">
-    <span id="ws-dot" class="w-2 h-2 rounded-full bg-gray-600 pulse"></span>
-    <span id="ws-lbl" class="text-gray-400">Conectando</span>
-  </div>
-</header>
-
-<!-- ══ KPI TOP BAR ══════════════════════════════════════════════════════════ -->
-<div id="topbar">
-  <div class="kpi-badge">
-    <span class="text-green-400 text-lg">↑</span>
-    <div><span class="text-gray-400">Entradas</span> <span class="kv text-green-400 val-flash" id="g-in">0</span></div>
-  </div>
-  <div class="kpi-badge">
-    <span class="text-red-400 text-lg">↓</span>
-    <div><span class="text-gray-400">Salidas</span> <span class="kv text-red-400 val-flash" id="g-out">0</span></div>
-  </div>
-  <div class="kpi-badge">
-    <span class="text-violet-400 text-base">◆</span>
-    <div><span class="text-gray-400">Leads</span> <span class="kv text-violet-400 val-flash" id="g-leads">0</span></div>
-  </div>
-  <div class="kpi-badge">
-    <span class="text-orange-400 text-base">◇</span>
-    <div><span class="text-gray-400">Bounced</span> <span class="kv text-orange-400 val-flash" id="g-bounced">0</span></div>
-  </div>
-  <div class="ml-auto text-xs text-gray-600 font-mono hidden md:block" id="clock">--:--:--</div>
-</div>
-
-<!-- ══ BODY: SIDEBAR + CONTENT ══════════════════════════════════════════════ -->
-<div id="app">
-
-  <!-- ── SIDEBAR: SELECTOR DE CÁMARAS ─────────────────────────────── -->
-  <aside id="sidebar">
-    <!-- Header sidebar -->
-    <div class="flex items-center gap-2 px-4 py-3 border-b border-blue-900/30">
-      <svg class="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-          d="M15 10l4.553-2.069A1 1 0 0121 8.82V15.18a1 1 0 01-1.447.89L15 14M3 8h12a2 2 0 012 2v4a2 2 0 01-2 2H3a2 2 0 01-2-2v-4a2 2 0 012-2z"/>
-      </svg>
-      <span class="sidebar-header-text text-xs font-semibold text-gray-400 uppercase tracking-widest">Cámaras</span>
-    </div>
-
-    <!-- Acciones rápidas -->
-    <div class="px-3 py-2 border-b border-blue-900/20 sidebar-label flex gap-2">
-      <button onclick="selectAll()"
-        class="flex-1 text-xs py-1.5 rounded-lg bg-blue-900/30 hover:bg-blue-700/30 text-blue-300 transition-colors">
-        Todas
-      </button>
-      <button onclick="selectNone()"
-        class="flex-1 text-xs py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 text-gray-400 transition-colors">
-        Ninguna
-      </button>
-    </div>
-    <div class="px-3 py-2 border-b border-blue-900/20 sidebar-label">
-      <button onclick="openDeviceManager()"
-        class="w-full text-xs py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors flex items-center justify-center gap-1">
-        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-        Gestor de Cámaras
-      </button>
-    </div>
-
-    <!-- Lista de chips de cámaras (generada por JS) -->
-    <div id="cam-list" class="flex-1 overflow-y-auto p-3 space-y-2">
-      <p class="text-xs text-gray-600 text-center py-4">Esperando datos...</p>
-    </div>
-
-    <!-- Log de eventos -->
-    <div class="border-t border-blue-900/20 sidebar-label">
-      <p class="text-xs text-gray-600 uppercase tracking-widest px-4 pt-3 pb-1">Log</p>
-      <div id="event-log" class="font-mono text-xs px-3 pb-3 space-y-0.5 max-h-32 overflow-y-auto text-gray-500"></div>
-    </div>
-  </aside>
-
-  <!-- ── CONTENT: FEEDS ─────────────────────────────────────────────── -->
-  <div id="content">
-    <div id="feed-grid">
-      <div class="flex items-center justify-center text-gray-700 text-sm">Conectando al servidor...</div>
-    </div>
-  </div>
-
-</div>
-
-<!-- ── MODAL GESTOR DE CÁMARAS ─────────────────────────────────────────────── -->
-<div id="device-modal" class="fixed inset-0 bg-black/80 z-50 hidden flex items-center justify-center backdrop-blur-sm transition-opacity duration-300 opacity-0">
-  <div class="bg-surface-800 rounded-xl border border-blue-900/30 w-full max-w-lg shadow-2xl flex flex-col max-h-[90vh]">
-    <div class="flex items-center justify-between p-4 border-b border-blue-900/30 bg-surface-750 rounded-t-xl">
-      <h2 class="text-white font-semibold text-lg flex items-center gap-2">
-        <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.82V15.18a1 1 0 01-1.447.89L15 14M3 8h12a2 2 0 012 2v4a2 2 0 01-2 2H3a2 2 0 01-2-2v-4a2 2 0 012-2z"></path></svg>
-        Gestor de Cámaras
-      </h2>
-      <button onclick="closeDeviceManager()" class="text-gray-400 hover:text-white transition-colors">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-      </button>
-    </div>
-    
-    <div class="p-4 overflow-y-auto flex-1 space-y-6">
-      <!-- Escaneo USB -->
+  <!-- ══ BARRA DE NAVEGACIÓN SUPERIOR (CORPORATIVA) ══════════════════════════ -->
+  <header class="no-print bg-brand-900 border-b border-brand-700/60 px-5 py-2.5 flex items-center justify-between shrink-0 z-30 shadow-sm">
+    <div class="flex items-center gap-3">
+      <!-- Icono de Movilidad y Aforo -->
+      <div class="w-9 h-9 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-primary-light">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+        </svg>
+      </div>
       <div>
-        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3 border-b border-gray-700 pb-1">Cámaras USB Locales</h3>
-        <div id="usb-list" class="space-y-2">
-          <p class="text-xs text-gray-500 italic">Buscando dispositivos...</p>
+        <div class="flex items-center gap-2">
+          <h1 class="text-sm font-bold tracking-tight text-white uppercase">Control de Aforo y Tráfico Vehicular</h1>
+          <span class="text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded bg-blue-900/50 text-blue-300 border border-blue-700/50">Plataforma Empresarial</span>
+        </div>
+        <p class="text-xs text-slate-400">Auditoría en tiempo real, registro de eventos y analítica de movilidad urbana</p>
+      </div>
+    </div>
+
+    <!-- Pestañas Principales -->
+    <nav class="flex items-center gap-1 bg-brand-950 p-1 rounded-lg border border-brand-700/50" id="app-nav">
+      <button onclick="switchTab('live')" id="btn-tab-live"
+        class="nav-tab active px-3.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 text-slate-300 hover:text-white">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.82V15.18a1 1 0 01-1.447.89L15 14M3 8h12a2 2 0 012 2v4a2 2 0 01-2 2H3a2 2 0 01-2-2v-4a2 2 0 012-2z"/></svg>
+        Monitoreo en Vivo
+      </button>
+
+      <button onclick="switchTab('analytics')" id="btn-tab-analytics"
+        class="nav-tab px-3.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 text-slate-400 hover:text-white">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        Métricas e Histórico
+      </button>
+
+      <button onclick="switchTab('events')" id="btn-tab-events"
+        class="nav-tab px-3.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 text-slate-400 hover:text-white">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+        Registro de Eventos
+      </button>
+
+      <button onclick="switchTab('settings')" id="btn-tab-settings"
+        class="nav-tab px-3.5 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 text-slate-400 hover:text-white">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        Dispositivos
+      </button>
+    </nav>
+
+    <!-- Estado de Conexión & Hora -->
+    <div class="flex items-center gap-4">
+      <div class="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded bg-brand-800 border border-brand-700 text-xs">
+        <span id="conn-dot" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span id="conn-text" class="text-slate-300 font-medium">Servicio Activo</span>
+      </div>
+      <div id="live-clock" class="text-xs font-mono text-slate-400 bg-brand-950 px-2.5 py-1 rounded border border-brand-700/40">--:--:--</div>
+    </div>
+  </header>
+
+  <!-- ══ CONTENIDO PRINCIPAL SEGÚN PESTAÑA ═══════════════════════════════════ -->
+  <main class="flex-1 overflow-hidden relative">
+
+    <!-- ────────────────────────────────────────────────────────────────────────
+         PESTAÑA 1: MONITOREO EN VIVO
+    ──────────────────────────────────────────────────────────────────────── -->
+    <section id="tab-live" class="h-full flex flex-col overflow-hidden">
+      <!-- Barra de Resumen Ejecutivo Superior -->
+      <div class="no-print bg-brand-900/90 border-b border-brand-700/50 px-5 py-2 flex items-center justify-between gap-4 flex-wrap text-xs">
+        <div class="flex items-center gap-6">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span class="text-slate-400">Total Entradas:</span>
+            <span id="kpi-live-in" class="font-bold text-sm text-emerald-400">0</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+            <span class="text-slate-400">Total Salidas:</span>
+            <span id="kpi-live-out" class="font-bold text-sm text-amber-400">0</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-blue-400"></span>
+            <span class="text-slate-400">Flujo Neto Total:</span>
+            <span id="kpi-live-total" class="font-bold text-sm text-blue-400">0</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-indigo-400"></span>
+            <span class="text-slate-400">Vehículos en Escena:</span>
+            <span id="kpi-live-active" class="font-bold text-sm text-indigo-300">0</span>
+          </div>
+        </div>
+
+        <!-- Selector de Cuadrícula de Cámaras -->
+        <div class="flex items-center gap-2">
+          <span class="text-slate-400">Disposición:</span>
+          <div class="inline-flex rounded-md shadow-sm">
+            <button onclick="setGridCols(1)" id="btn-grid-1" class="px-2.5 py-1 text-xs font-medium rounded-l border border-brand-700 bg-brand-800 text-slate-300 hover:bg-brand-700">1 Canal</button>
+            <button onclick="setGridCols(2)" id="btn-grid-2" class="px-2.5 py-1 text-xs font-medium border-t border-b border-brand-700 bg-blue-600 text-white">2 Canales</button>
+            <button onclick="setGridCols(3)" id="btn-grid-3" class="px-2.5 py-1 text-xs font-medium rounded-r border border-brand-700 bg-brand-800 text-slate-300 hover:bg-brand-700">3 Canales</button>
+          </div>
         </div>
       </div>
+
+      <!-- Cuadrícula de Streams de Video -->
+      <div id="live-grid" class="flex-1 p-3 grid grid-cols-2 gap-3 overflow-y-auto">
+        <!-- Generado dinámicamente por JavaScript -->
+      </div>
+    </section>
+
+    <!-- ────────────────────────────────────────────────────────────────────────
+         PESTAÑA 2: ANALÍTICA HISTÓRICA (DÍAS, HORAS PICO, COMPOSICIÓN)
+    ──────────────────────────────────────────────────────────────────────── -->
+    <section id="tab-analytics" class="h-full hidden flex-col overflow-y-auto p-6 space-y-6 bg-brand-950">
       
-      <!-- Añadir RTSP -->
-      <div>
-        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3 border-b border-gray-700 pb-1">Cámara de Red (RTSP / HTTP)</h3>
-        <div class="flex gap-2">
-          <input type="text" id="rtsp-url" placeholder="rtsp://192.168.1.100:554/stream" 
-            class="flex-1 bg-surface-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors">
-          <button onclick="addRtspCamera()" 
-            class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm transition-colors whitespace-nowrap font-medium">
-            Añadir Stream
+      <!-- Encabezado del Módulo de Analítica -->
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-brand-700/60">
+        <div>
+          <h2 class="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+            <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            Análisis Estadístico de Aforo y Patrones de Tráfico
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">Indicadores consolidados por días, comportamiento horario y clasificación vehicular para toma de decisiones.</p>
+        </div>
+
+        <!-- Filtros de Fecha y Cámara -->
+        <div class="flex items-center gap-3 no-print">
+          <div class="flex items-center gap-1.5 bg-brand-900 px-3 py-1.5 rounded-lg border border-brand-700">
+            <label class="text-xs text-slate-400">Canal:</label>
+            <select id="filter-analytics-cam" onchange="loadAnalyticsData()" class="bg-transparent text-xs text-white outline-none cursor-pointer">
+              <option value="all" class="bg-brand-900">Todas las Cámaras</option>
+            </select>
+          </div>
+
+          <div class="flex items-center gap-1.5 bg-brand-900 px-3 py-1.5 rounded-lg border border-brand-700">
+            <label class="text-xs text-slate-400">Fecha:</label>
+            <input type="date" id="filter-analytics-date" onchange="loadAnalyticsData()"
+              class="bg-transparent text-xs text-white outline-none cursor-pointer" />
+          </div>
+
+          <button onclick="window.print()"
+            class="px-3 py-1.5 rounded-lg bg-brand-800 hover:bg-brand-700 border border-brand-600 text-xs font-medium text-slate-200 flex items-center gap-1.5 shadow-sm transition">
+            <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+            Imprimir Informe PDF
           </button>
         </div>
-        <p id="rtsp-error" class="text-red-400 text-xs mt-2 hidden"></p>
       </div>
-    </div>
-    
-    <div class="p-4 border-t border-blue-900/30 bg-surface-750 rounded-b-xl flex justify-end">
-      <button onclick="closeDeviceManager()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm transition-colors">Cerrar</button>
-    </div>
-  </div>
-</div>
 
-<!-- ══════════════════ JAVASCRIPT ══════════════════════════════════════════ -->
-<script>
-// ─── ESTADO ───────────────────────────────────────────────────────────────
-const state = {
-  cameras: {},          // cam_id → last metric dict
-  selected: new Set(),  // cam_ids actualmente visibles
-  layout: 1,
-};
-
-const COLOR = {
-  Automovil:'#3b82f6', Camion:'#ef4444', Autobus:'#f59e0b',
-  Motocicleta:'#22c55e', Bicicleta:'#a78bfa',
-};
-
-// ─── SIDEBAR ──────────────────────────────────────────────────────────────
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('collapsed');
-}
-
-// ─── LAYOUT ───────────────────────────────────────────────────────────────
-function setLayout(n) {
-  state.layout = n;
-  document.querySelectorAll('.layout-btn').forEach(b => {
-    b.classList.toggle('bg-blue-600', b.id === `layout-${n}`);
-    b.classList.toggle('text-white',  b.id === `layout-${n}`);
-    b.classList.toggle('bg-surface-700', b.id !== `layout-${n}`);
-    b.classList.toggle('text-gray-400',  b.id !== `layout-${n}`);
-  });
-  renderFeedGrid();
-}
-
-// ─── SELECCION DE CAMARAS ─────────────────────────────────────────────────
-function toggleCam(camId) {
-  const isSelected = state.selected.has(camId);
-  if (isSelected) {
-    state.selected.delete(camId);
-  } else {
-    state.selected.add(camId);
-  }
-  
-  // Enviar comando al backend para habilitar/deshabilitar inferencia
-  fetch(`/api/camera/${camId}/toggle`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled: !isSelected })
-  }).catch(console.error);
-
-  updateChipStates();
-  renderFeedGrid();
-  logEvent(`${camId} ${!isSelected ? 'activada':'desactivada'}`, 'info');
-}
-function selectAll() {
-  Object.keys(state.cameras).forEach(id => {
-    state.selected.add(id);
-    fetch(`/api/camera/${id}/toggle`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: true })
-    }).catch(console.error);
-  });
-  updateChipStates(); renderFeedGrid();
-}
-function selectNone() {
-  Object.keys(state.cameras).forEach(id => {
-    fetch(`/api/camera/${id}/toggle`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: false })
-    }).catch(console.error);
-  });
-  state.selected.clear();
-  updateChipStates(); renderFeedGrid();
-}
-function updateChipStates() {
-  document.querySelectorAll('.cam-chip').forEach(el => {
-    const id = el.dataset.cam;
-    el.classList.toggle('active', state.selected.has(id));
-  });
-}
-
-// ─── SIDEBAR: CHIP DE CÁMARA ──────────────────────────────────────────────
-function ensureCamChip(camId) {
-  if (document.getElementById(`chip-${camId}`)) return;
-
-  const list = document.getElementById('cam-list');
-  // Quitar placeholder
-  const ph = list.querySelector('p');
-  if (ph) ph.remove();
-
-  const div = document.createElement('div');
-  div.className = 'cam-chip fade-in';
-  div.id = `chip-${camId}`;
-  div.dataset.cam = camId;
-  div.onclick = () => toggleCam(camId);
-  div.innerHTML = `
-    <div class="chip-icon">${camId.replace('cam','C')}</div>
-    <div class="flex-1 min-w-0 sidebar-label">
-      <div class="flex items-center gap-2">
-        <span class="text-sm font-semibold text-white truncate">${camId.toUpperCase()}</span>
-        <span id="cdot-${camId}" class="cam-status-dot bg-gray-600 pulse"></span>
+      <!-- Membrete exclusivo para Reporte Impreso -->
+      <div class="print-only mb-6 border-b border-slate-300 pb-4">
+        <h1 class="text-2xl font-bold text-slate-900">INFORME EJECUTIVO DE AFORO VEHICULAR</h1>
+        <p class="text-sm text-slate-600">Reporte Oficial de Movilidad y Conteo de Vehículos</p>
+        <div class="mt-2 text-xs text-slate-500 flex justify-between">
+          <span>Fecha de Emisión: <span id="print-date"></span></span>
+          <span>Estado: Certificado por Auditoría Automática</span>
+        </div>
       </div>
-      <div class="text-xs text-gray-500 mt-0.5" id="cfps-${camId}">-- FPS</div>
-      <!-- Mini métricas -->
-      <div class="flex gap-2 mt-1.5 sidebar-label">
-        <span class="text-xs text-green-400">↑<span id="cin-${camId}" class="font-bold">0</span></span>
-        <span class="text-xs text-red-400">↓<span id="cout-${camId}" class="font-bold">0</span></span>
-        <span class="text-xs text-violet-400">L:<span id="cld-${camId}" class="font-bold">0</span></span>
+
+      <!-- Cuadrícula de KPIs Ejecutivos -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- KPI 1: Volumen Total -->
+        <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-4 shadow-sm">
+          <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
+            <span>Aforo Total Registrado</span>
+            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+          </div>
+          <div class="text-2xl font-extrabold text-white" id="stat-total-flow">0</div>
+          <div class="mt-2 flex items-center gap-3 text-xs text-slate-400">
+            <span class="text-emerald-400 font-semibold" id="stat-in-count">↑ 0 In</span>
+            <span class="text-amber-400 font-semibold" id="stat-out-count">↓ 0 Out</span>
+          </div>
+        </div>
+
+        <!-- KPI 2: Hora Pico -->
+        <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-4 shadow-sm">
+          <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
+            <span>Hora Pico Registrada</span>
+            <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <div class="text-2xl font-extrabold text-amber-400" id="stat-peak-hour">--:--</div>
+          <div class="mt-2 text-xs text-slate-400">Período de mayor densidad de circulación</div>
+        </div>
+
+        <!-- KPI 3: Transporte Pesado / Carga -->
+        <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-4 shadow-sm">
+          <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
+            <span>Transporte de Carga & Autobús</span>
+            <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+          </div>
+          <div class="text-2xl font-extrabold text-white" id="stat-heavy-percent">0%</div>
+          <div class="mt-2 text-xs text-slate-400" id="stat-heavy-count">0 vehículos pesados</div>
+        </div>
+
+        <!-- KPI 4: Tiempo Medio de Permanencia -->
+        <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-4 shadow-sm">
+          <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
+            <span>Permanencia Media en Zona</span>
+            <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          </div>
+          <div class="text-2xl font-extrabold text-emerald-400" id="stat-avg-dwell">0.0 s</div>
+          <div class="mt-2 text-xs text-slate-400">Tiempo de tránsito en zona de lectura</div>
+        </div>
       </div>
-    </div>
-    <!-- Boton reset -->
-    <button onclick="event.stopPropagation(); resetCam('${camId}')"
-      class="sidebar-label text-gray-600 hover:text-blue-400 transition-colors p-1 rounded flex-shrink-0"
-      title="Reiniciar contadores">
-      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-      </svg>
-    </button>
-  `;
-  list.appendChild(div);
 
-  // Auto-seleccionar al aparecer
-  state.selected.add(camId);
-  updateChipStates();
-  renderFeedGrid();
-}
-
-function updateChipData(camId, data) {
-  const dot = document.getElementById(`cdot-${camId}`);
-  if (dot) {
-    const ok = data.active_tracks > 0 || data.total_in > 0;
-    dot.className = `cam-status-dot ${ok ? 'bg-green-500':'bg-yellow-500'} pulse`;
-  }
-  const setT = (id, v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
-  setT(`cfps-${camId}`, `${data.fps_processing} FPS`);
-  setT(`cin-${camId}`,  data.total_in);
-  setT(`cout-${camId}`, data.total_out);
-  setT(`cld-${camId}`,  data.leads);
-}
-
-// ─── GRID DE FEEDS ─────────────────────────────────────────────────────────
-const feedCards = {};  // cam_id → DOM element
-
-function renderFeedGrid() {
-  const grid = document.getElementById('feed-grid');
-  const visible = [...state.selected];
-
-  // Ocultar / mostrar las tarjetas existentes
-  Object.keys(feedCards).forEach(id => {
-    feedCards[id].style.display = state.selected.has(id) ? 'flex' : 'none';
-  });
-
-  // Crear tarjetas faltantes
-  visible.forEach(camId => {
-    if (!feedCards[camId]) createFeedCard(camId);
-  });
-
-  // Actualizar clase del grid segun layout y cantidad visible
-  const cols = Math.min(state.layout, visible.length || 1);
-  grid.className = ``;
-  grid.style.cssText = `flex:1; display:grid; gap:12px; padding:12px; overflow:hidden; align-items:stretch;
-    grid-template-columns: repeat(${cols}, 1fr);`;
-
-  // Mensaje cuando no hay camaras seleccionadas
-  let empty = grid.querySelector('.empty-msg');
-  if (visible.length === 0) {
-    if (!empty) {
-      empty = document.createElement('div');
-      empty.className = 'empty-msg flex items-center justify-center text-gray-700 text-sm col-span-3';
-      empty.textContent = 'Selecciona una camara en el panel izquierdo';
-      grid.appendChild(empty);
-    }
-  } else if (empty) {
-    empty.remove();
-  }
-}
-
-function createFeedCard(camId) {
-  const grid = document.getElementById('feed-grid');
-  const card = document.createElement('div');
-  card.id = `card-${camId}`;
-  card.className = 'feed-card fade-in';
-  card.innerHTML = `
-    <!-- Header -->
-    <div class="feed-card-header flex items-center gap-2">
-      <span id="fdot-${camId}" class="w-2 h-2 rounded-full bg-gray-600 pulse flex-shrink-0"></span>
-      <span class="font-bold text-sm text-white">${camId.toUpperCase()}</span>
-      <span id="ffps-${camId}" class="text-xs text-gray-500 ml-1">-- FPS</span>
-      <!-- Clases activas -->
-      <div id="fclasses-${camId}" class="flex flex-wrap gap-1 ml-2"></div>
-      <!-- Activos -->
-      <span class="ml-auto text-xs px-2 py-0.5 rounded-full bg-blue-900/40 text-blue-300">
-        <span id="factive-${camId}">0</span> activos
-      </span>
-      <!-- Edit Line btn -->
-      <button onclick="editLine('${camId}')"
-        class="text-gray-600 hover:text-blue-400 transition-colors p-1 rounded ml-1"
-        title="Editar línea de conteo">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
-        </svg>
-      </button>
-      <!-- Reset btn -->
-      <button onclick="resetCam('${camId}')"
-        class="text-gray-600 hover:text-orange-400 transition-colors p-1 rounded ml-1"
-        title="Reiniciar contadores">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-        </svg>
-      </button>
-    </div>
-    <!-- Video -->
-    <div class="feed-video-wrap relative">
-      <img src="/video_feed/${camId}" alt="Feed ${camId}" id="fimg-${camId}"
-        onerror="handleImgError(this, '${camId}')" class="w-full h-full object-cover" />
-        
-      <!-- Editor SVG -->
-      <svg id="fline-svg-${camId}" class="absolute top-0 left-0 w-full h-full pointer-events-none hidden" style="z-index:10;"></svg>
-      
-      <!-- Panel de Controles de Edición -->
-      <div id="fline-editor-${camId}" class="absolute top-2 left-1/2 -translate-x-1/2 hidden bg-gray-900/90 p-2 rounded-lg flex items-center gap-2 z-20 border border-gray-700 shadow-xl">
-        <button onclick="swapLineOrientation('${camId}')" class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs text-white">Swap In/Out</button>
-        <button onclick="saveLine('${camId}')" class="px-2 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold text-white">Guardar</button>
-        <button onclick="cancelEditLine('${camId}')" class="px-2 py-1 bg-red-600 hover:bg-red-500 rounded text-xs text-white">Cancelar</button>
+      <!-- Gráfico 1: Desglose por Horas del Día (00:00 - 23:00) -->
+      <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="text-sm font-bold text-white">Distribución Horaria del Flujo Vehicular (00:00 a 23:00 hrs)</h3>
+            <p class="text-xs text-slate-400">Comparativa de aforo por hora de entrada vs salida para detección de horas pico de tránsito.</p>
+          </div>
+          <div class="flex items-center gap-4 text-xs font-medium">
+            <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-3 rounded bg-emerald-500 inline-block"></span> Entradas</span>
+            <span class="flex items-center gap-1.5 text-amber-400"><span class="w-3 h-3 rounded bg-amber-500 inline-block"></span> Salidas</span>
+          </div>
+        </div>
+        <div class="h-64 relative">
+          <canvas id="chart-hourly"></canvas>
+        </div>
       </div>
-    </div>
-    <!-- Metrics bar -->
-    <div class="feed-metrics-bar">
-      <div class="metric-pill">
-        <div class="val text-green-400 val-flash" id="fin-${camId}">0</div>
-        <div class="lbl">Entradas</div>
-      </div>
-      <div class="metric-pill">
-        <div class="val text-red-400 val-flash" id="fout-${camId}">0</div>
-        <div class="lbl">Salidas</div>
-      </div>
-      <div class="metric-pill">
-        <div class="val text-violet-400 val-flash" id="fleads-${camId}">0</div>
-        <div class="lbl">Leads</div>
-      </div>
-      <div class="metric-pill">
-        <div class="val text-orange-400 val-flash" id="fbounced-${camId}">0</div>
-        <div class="lbl">Bounced</div>
-      </div>
-    </div>
-  `;
-  grid.appendChild(card);
-  feedCards[camId] = card;
-}
 
-function handleImgError(img, camId) {
-  setTimeout(() => { img.src = `/video_feed/${camId}?t=${Date.now()}`; }, 2000);
-}
-
-// ─── ACTUALIZAR FEED CARD ─────────────────────────────────────────────────
-function updateFeedCard(camId, data) {
-  const set = (id, v) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (el.textContent != v) {
-      el.textContent = v;
-      el.classList.add('bump');
-      setTimeout(() => el.classList.remove('bump'), 450);
-    }
-  };
-
-  const dot = document.getElementById(`fdot-${camId}`);
-  if (dot) dot.className = `w-2 h-2 rounded-full ${data.active_tracks>0?'bg-green-400':'bg-yellow-500'} pulse flex-shrink-0`;
-
-  set(`ffps-${camId}`,     `${data.fps_processing} FPS`);
-  set(`factive-${camId}`,  data.active_tracks);
-  set(`fin-${camId}`,      data.total_in);
-  set(`fout-${camId}`,     data.total_out);
-  set(`fleads-${camId}`,   data.leads);
-  set(`fbounced-${camId}`, data.bounced);
-
-  // Chips de clases activas
-  const clsEl = document.getElementById(`fclasses-${camId}`);
-  if (clsEl && data.class_counts) {
-    clsEl.innerHTML = Object.entries(data.class_counts)
-      .filter(([,v]) => v > 0)
-      .map(([cls,cnt]) => `<span class="class-chip" style="background:${COLOR[cls]||'#475569'}22;color:${COLOR[cls]||'#94a3b8'};border:1px solid ${COLOR[cls]||'#475569'}44">${cls} ${cnt}</span>`)
-      .join('');
-  }
-}
-
-// ─── KPIs GLOBALES ────────────────────────────────────────────────────────
-function updateGlobalKPIs() {
-  let si=0, so=0, sl=0, sb=0;
-  Object.values(state.cameras).forEach(m => {
-    si += m.total_in||0; so += m.total_out||0;
-    sl += m.leads||0;    sb += m.bounced||0;
-  });
-  const set = (id,v,cls) => {
-    const el=document.getElementById(id);
-    if(!el) return;
-    if(el.textContent != v) { el.textContent=v; el.classList.add('bump'); setTimeout(()=>el.classList.remove('bump'),450); }
-  };
-  set('g-in', si); set('g-out', so); set('g-leads', sl); set('g-bounced', sb);
-}
-
-// ─── RESET ───────────────────────────────────────────────────────────────
-async function resetCam(camId) {
-  try {
-    const r = await fetch(`/api/reset/${camId}`, {method:'POST'});
-    if (r.ok) logEvent(`Reset enviado: ${camId}`, 'warn');
-    else logEvent(`Error reset ${camId}: ${r.status}`, 'error');
-  } catch(e) { logEvent(`Fallo red: reset ${camId}`, 'error'); }
-}
-
-// ─── LOG ─────────────────────────────────────────────────────────────────
-function logEvent(msg, level='info') {
-  const el = document.getElementById('event-log');
-  if (!el) return;
-  const colors = {info:'text-blue-500', success:'text-green-400', warn:'text-yellow-400', error:'text-red-400'};
-  const p = document.createElement('p');
-  p.className = colors[level]||'text-gray-400';
-  const t = new Date().toLocaleTimeString('es-MX',{hour12:false});
-  p.textContent = `[${t}] ${msg}`;
-  el.prepend(p);
-  while (el.children.length > 60) el.removeChild(el.lastChild);
-}
-
-// ─── WEBSOCKET ───────────────────────────────────────────────────────────
-let ws=null, wsRetries=0;
-
-function connectWS() {
-  const proto = location.protocol==='https:'?'wss':'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws/metrics`);
-
-  ws.onopen = () => {
-    wsRetries = 0;
-    document.getElementById('ws-dot').className = 'w-2 h-2 rounded-full bg-green-500 pulse';
-    document.getElementById('ws-lbl').textContent = 'En vivo';
-    document.getElementById('ws-lbl').className = 'text-green-400';
-    logEvent('WebSocket conectado', 'success');
-  };
-
-  ws.onmessage = ({data}) => {
-    try {
-      const msg = JSON.parse(data);
-      if (msg.type==='metrics_update' || msg.type==='initial_state') {
-        // Reloj
-        const ck = document.getElementById('clock');
-        if (ck) ck.textContent = new Date(msg.server_time*1000).toLocaleTimeString('es-MX',{hour12:false});
-
-        // Procesar cada camara
-        Object.entries(msg.cameras||{}).forEach(([camId, camData]) => {
-          state.cameras[camId] = camData;
-          ensureCamChip(camId);
-          updateChipData(camId, camData);
-          if (state.selected.has(camId)) {
-            if (!feedCards[camId]) createFeedCard(camId);
-            updateFeedCard(camId, camData);
-          }
-        });
-        updateGlobalKPIs();
-      }
-      if (msg.type==='reset_ok') logEvent(`Reset OK: ${msg.cam_id}`, 'warn');
-    } catch(e) { console.error('WS parse error', e); }
-  };
-
-  ws.onerror = () => logEvent('Error WS', 'error');
-  ws.onclose = () => {
-    document.getElementById('ws-dot').className = 'w-2 h-2 rounded-full bg-red-500';
-    document.getElementById('ws-lbl').textContent = 'Desconectado';
-    document.getElementById('ws-lbl').className = 'text-red-400';
-    wsRetries++;
-    if (wsRetries <= 30) {
-      const delay = Math.min(1500*wsRetries, 12000);
-      logEvent(`Reconectando WS en ${(delay/1000).toFixed(1)}s...`, 'warn');
-      setTimeout(connectWS, delay);
-    }
-  };
-}
-
-// ─── INIT ────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  logEvent('Dashboard iniciado');
-  connectWS();
-});
-
-// ─── EDITOR DE LÍNEAS ───────────────────────────────────────────────────────
-const lineEditors = {}; // camId -> state
-
-async function editLine(camId) {
-  try {
-    const res = await fetch(`/api/line/${camId}`);
-    if(!res.ok) throw new Error("No se pudo obtener la línea");
-    const data = await res.json();
-    
-    // UI
-    document.getElementById(`fline-svg-${camId}`).classList.remove('hidden');
-    document.getElementById(`fline-svg-${camId}`).classList.add('pointer-events-auto'); // habilitar clicks
-    document.getElementById(`fline-editor-${camId}`).classList.remove('hidden');
-    document.getElementById(`fline-editor-${camId}`).classList.add('flex');
-    
-    // Iniciar editor
-    initLineEditor(camId, data.line.start, data.line.end);
-    
-  } catch (err) {
-    alert("Error al cargar la línea para edición.");
-    console.error(err);
-  }
-}
-
-function initLineEditor(camId, startCoords, endCoords) {
-  const svg = document.getElementById(`fline-svg-${camId}`);
-  svg.innerHTML = ''; // limpiar
-  
-  // Guardamos las coords nativas (1280x720) en el estado
-  lineEditors[camId] = {
-    start: [...startCoords],
-    end: [...endCoords],
-    dragging: null // 'start' o 'end'
-  };
-  
-  // Crear elementos SVG
-  const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  line.setAttribute("stroke", "#ffeb3b");
-  line.setAttribute("stroke-width", "4");
-  line.setAttribute("stroke-dasharray", "8 4");
-  
-  const startHandle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  startHandle.setAttribute("r", "12");
-  startHandle.setAttribute("fill", "#22c55e"); // Entrada - Verde
-  startHandle.setAttribute("class", "cursor-move drop-shadow-md");
-  
-  const endHandle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  endHandle.setAttribute("r", "12");
-  endHandle.setAttribute("fill", "#ef4444"); // Salida - Rojo
-  endHandle.setAttribute("class", "cursor-move drop-shadow-md");
-
-  svg.appendChild(line);
-  svg.appendChild(startHandle);
-  svg.appendChild(endHandle);
-  
-  const state = lineEditors[camId];
-  const NATIVE_W = 1280;
-  const NATIVE_H = 720;
-  
-  // Función para proyectar de coords nativas a pixeles SVG
-  const updateDraw = () => {
-    const rect = svg.getBoundingClientRect();
-    const scaleX = rect.width / NATIVE_W;
-    const scaleY = rect.height / NATIVE_H;
-    
-    const sx = state.start[0] * scaleX;
-    const sy = state.start[1] * scaleY;
-    const ex = state.end[0] * scaleX;
-    const ey = state.end[1] * scaleY;
-    
-    line.setAttribute("x1", sx); line.setAttribute("y1", sy);
-    line.setAttribute("x2", ex); line.setAttribute("y2", ey);
-    startHandle.setAttribute("cx", sx); startHandle.setAttribute("cy", sy);
-    endHandle.setAttribute("cx", ex); endHandle.setAttribute("cy", ey);
-  };
-  
-  // Eventos de drag
-  const getMousePos = (e) => {
-    const rect = svg.getBoundingClientRect();
-    const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-    const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
-    return [
-      Math.round(x * (NATIVE_W / rect.width)),
-      Math.round(y * (NATIVE_H / rect.height))
-    ];
-  };
-
-  startHandle.onmousedown = (e) => { state.dragging = 'start'; e.stopPropagation(); };
-  endHandle.onmousedown = (e) => { state.dragging = 'end'; e.stopPropagation(); };
-  
-  svg.onmousemove = (e) => {
-    if(!state.dragging) return;
-    state[state.dragging] = getMousePos(e);
-    updateDraw();
-  };
-  
-  window.addEventListener('mouseup', () => { state.dragging = null; });
-  
-  // Render inicial
-  updateDraw();
-  
-  // Actualizar si resizea la ventana
-  window.addEventListener('resize', updateDraw);
-  state.updateDraw = updateDraw; // para swap
-}
-
-function swapLineOrientation(camId) {
-  const state = lineEditors[camId];
-  if(!state) return;
-  const tmp = state.start;
-  state.start = state.end;
-  state.end = tmp;
-  state.updateDraw();
-}
-
-function cancelEditLine(camId) {
-  document.getElementById(`fline-svg-${camId}`).classList.add('hidden');
-  document.getElementById(`fline-svg-${camId}`).classList.remove('pointer-events-auto');
-  document.getElementById(`fline-editor-${camId}`).classList.add('hidden');
-  document.getElementById(`fline-editor-${camId}`).classList.remove('flex');
-  delete lineEditors[camId];
-}
-
-async function saveLine(camId) {
-  const state = lineEditors[camId];
-  if(!state) return;
-  
-  try {
-    const res = await fetch(`/api/line/${camId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ start: state.start, end: state.end })
-    });
-    if(!res.ok) throw new Error("Error al guardar");
-    cancelEditLine(camId);
-  } catch (err) {
-    alert("Error al guardar la línea.");
-    console.error(err);
-  }
-}
-
-
-// ─── GESTOR DE CÁMARAS ────────────────────────────────────────────────────────
-function openDeviceManager() {
-  document.getElementById('device-modal').classList.remove('hidden');
-  setTimeout(() => document.getElementById('device-modal').classList.remove('opacity-0'), 10);
-  fetchDevices();
-}
-
-function closeDeviceManager() {
-  document.getElementById('device-modal').classList.add('opacity-0');
-  setTimeout(() => document.getElementById('device-modal').classList.add('hidden'), 300);
-}
-
-async function fetchDevices() {
-  const usbList = document.getElementById('usb-list');
-  usbList.innerHTML = '<p class="text-xs text-gray-500 italic">Buscando dispositivos USB...</p>';
-  
-  try {
-    const res = await fetch('/api/devices');
-    const data = await res.json();
-    
-    usbList.innerHTML = '';
-    
-    if (data.usb_cameras.length === 0) {
-      usbList.innerHTML = '<p class="text-xs text-gray-500 italic">No se encontraron cámaras USB.</p>';
-    } else {
-      data.usb_cameras.forEach(cam => {
-        const isAdded = data.active_streams.some(id => data.sources[id] === cam.source);
-        usbList.innerHTML += `
-          <div class="flex items-center justify-between bg-surface-900 border border-gray-700 p-3 rounded-lg">
+      <!-- Fila de 2 Gráficos: Tendencia Diaria + Composición de Flota -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Gráfico 2: Tendencia de Días Anteriores (2/3 de ancho) -->
+        <div class="card-box lg:col-span-2 bg-brand-900/90 border border-brand-700/60 rounded-xl p-5 shadow-sm">
+          <div class="flex items-center justify-between mb-4">
             <div>
-              <p class="text-sm text-white font-medium">${cam.name} (Puerto ${cam.source})</p>
-              <p class="text-xs text-gray-400">${cam.resolution} @ ${Math.round(cam.fps)} FPS</p>
+              <h3 class="text-sm font-bold text-white">Volumen Histórico por Días</h3>
+              <p class="text-xs text-slate-400">Tendencia acumulada del aforo vehicular en los últimos días.</p>
             </div>
-            <button onclick="addUsbCamera(${cam.source})" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${isAdded ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white'}" ${isAdded ? 'disabled' : ''}>
-              ${isAdded ? 'Añadida' : 'Añadir'}
+            <select id="filter-days-span" onchange="loadAnalyticsData()" class="no-print bg-brand-950 text-xs text-slate-300 border border-brand-700 rounded px-2.5 py-1 outline-none">
+              <option value="7">Últimos 7 días</option>
+              <option value="14">Últimos 14 días</option>
+              <option value="30">Últimos 30 días</option>
+            </select>
+          </div>
+          <div class="h-56 relative">
+            <canvas id="chart-daily"></canvas>
+          </div>
+        </div>
+
+        <!-- Gráfico 3: Composición de Flota Vehicular (1/3 de ancho) -->
+        <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-5 shadow-sm flex flex-col">
+          <div>
+            <h3 class="text-sm font-bold text-white">Composición de Flota</h3>
+            <p class="text-xs text-slate-400">Desglose porcentual por categoría vehicular.</p>
+          </div>
+          <div class="flex-1 min-h-[190px] relative flex items-center justify-center pt-2">
+            <canvas id="chart-pie"></canvas>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────────────────────────────
+         PESTAÑA 3: REGISTRO COMPLETO DE EVENTOS (BITÁCORA PARA AUDITORÍA)
+    ──────────────────────────────────────────────────────────────────────── -->
+    <section id="tab-events" class="h-full hidden flex-col overflow-hidden p-6 bg-brand-950">
+      
+      <!-- Barra de Filtros y Acciones de Exportación -->
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-brand-700/60">
+        <div>
+          <h2 class="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+            <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+            Registro Individual de Cruces y Eventos
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">Bitácora auditable de cada vehículo que transita por las líneas de aforo.</p>
+        </div>
+
+        <div class="flex items-center gap-2 no-print">
+          <!-- Botón Exportar CSV -->
+          <button onclick="exportCSV()"
+            class="px-3.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold text-white flex items-center gap-1.5 shadow-sm transition">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            Exportar CSV (Excel)
+          </button>
+
+          <!-- Botón Imprimir Reporte Formal -->
+          <button onclick="window.print()"
+            class="px-3.5 py-1.5 rounded-lg bg-brand-800 hover:bg-brand-700 border border-brand-600 text-xs font-semibold text-slate-200 flex items-center gap-1.5 shadow-sm transition">
+            <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+            Imprimir Informe PDF
+          </button>
+        </div>
+      </div>
+
+      <!-- Filtros Dinámicos -->
+      <div class="no-print my-3 p-3 bg-brand-900 border border-brand-700/60 rounded-xl grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+        <div>
+          <label class="block text-slate-400 mb-1">Cámara:</label>
+          <select id="filter-ev-cam" onchange="loadEvents(0)" class="w-full bg-brand-950 border border-brand-700 rounded px-2 py-1.5 text-slate-200 outline-none">
+            <option value="all">Todas</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1">Tipo de Vehículo:</label>
+          <select id="filter-ev-type" onchange="loadEvents(0)" class="w-full bg-brand-950 border border-brand-700 rounded px-2 py-1.5 text-slate-200 outline-none">
+            <option value="all">Todos los Tipos</option>
+            <option value="Automovil">Automóvil</option>
+            <option value="Camion">Camión</option>
+            <option value="Autobus">Autobús</option>
+            <option value="Motocicleta">Motocicleta</option>
+            <option value="Bicicleta">Bicicleta</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1">Sentido de Circulación:</label>
+          <select id="filter-ev-dir" onchange="loadEvents(0)" class="w-full bg-brand-950 border border-brand-700 rounded px-2 py-1.5 text-slate-200 outline-none">
+            <option value="all">Cualquiera (In & Out)</option>
+            <option value="IN">Entrada (IN)</option>
+            <option value="OUT">Salida (OUT)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1">Buscar por Fecha:</label>
+          <input type="date" id="filter-ev-date" onchange="loadEvents(0)" class="w-full bg-brand-950 border border-brand-700 rounded px-2 py-1.5 text-slate-200 outline-none" />
+        </div>
+      </div>
+
+      <!-- Tabla de Eventos -->
+      <div class="flex-1 overflow-y-auto card-box bg-brand-900 border border-brand-700/60 rounded-xl shadow-sm">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead class="bg-brand-850 text-slate-400 sticky top-0 border-b border-brand-700/60 uppercase tracking-wider text-[11px]">
+            <tr>
+              <th class="py-2.5 px-4 font-semibold">Fecha y Hora</th>
+              <th class="py-2.5 px-4 font-semibold">Canal / Cámara</th>
+              <th class="py-2.5 px-4 font-semibold">Track ID</th>
+              <th class="py-2.5 px-4 font-semibold">Clasificación Vehicular</th>
+              <th class="py-2.5 px-4 font-semibold">Sentido</th>
+              <th class="py-2.5 px-4 font-semibold">Permanencia</th>
+              <th class="py-2.5 px-4 font-semibold">Confianza</th>
+            </tr>
+          </thead>
+          <tbody id="events-table-body" class="divide-y divide-brand-700/40 text-slate-300">
+            <tr>
+              <td colspan="7" class="text-center py-8 text-slate-500">Cargando registros...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Paginación -->
+      <div class="no-print pt-3 flex items-center justify-between text-xs text-slate-400">
+        <span id="events-pagination-info">Mostrando 0 - 0 de 0</span>
+        <div class="flex gap-2">
+          <button id="btn-prev-page" onclick="prevEventsPage()" class="px-3 py-1 rounded bg-brand-900 hover:bg-brand-800 border border-brand-700 disabled:opacity-40" disabled>Anterior</button>
+          <button id="btn-next-page" onclick="nextEventsPage()" class="px-3 py-1 rounded bg-brand-900 hover:bg-brand-800 border border-brand-700 disabled:opacity-40" disabled>Siguiente</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ────────────────────────────────────────────────────────────────────────
+         PESTAÑA 4: GESTIÓN DE DISPOSITIVOS Y LÍNEAS DE AFORO
+    ──────────────────────────────────────────────────────────────────────── -->
+    <section id="tab-settings" class="h-full hidden flex-col overflow-y-auto p-6 space-y-6 bg-brand-950">
+      <div class="pb-4 border-b border-brand-700/60">
+        <h2 class="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+          <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          Administración de Canales y Calibración de Líneas
+        </h2>
+        <p class="text-xs text-slate-400 mt-0.5">Detección de puertos de video USB, configuración de streams IP / RTSP y líneas de conteo.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Agregar Dispositivo -->
+        <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-5 shadow-sm space-y-4">
+          <h3 class="text-sm font-bold text-white">Incorporar Nuevo Canal de Video</h3>
+          <div class="space-y-3 text-xs">
+            <div>
+              <label class="block text-slate-400 mb-1">Identificador Único (ID):</label>
+              <input type="text" id="new-cam-id" placeholder="ej. cam3, acceso_norte" class="w-full bg-brand-950 border border-brand-700 rounded px-3 py-2 text-white outline-none focus:border-blue-500" />
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">Origen / Fuente de Video:</label>
+              <input type="text" id="new-cam-source" placeholder="ej. 2 (para USB) o rtsp://usuario:pass@ip:554/stream" class="w-full bg-brand-950 border border-brand-700 rounded px-3 py-2 text-white outline-none focus:border-blue-500" />
+              <p class="text-[11px] text-slate-500 mt-1">Escribe el índice numérico (0, 1, 2) para cámaras USB locales, o la URL RTSP de cámaras de red.</p>
+            </div>
+            <button onclick="submitNewCamera()" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition shadow-sm">
+              Conectar e Iniciar Aforo
             </button>
           </div>
+        </div>
+
+        <!-- Dispositivos Detectados en el Equipo -->
+        <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-5 shadow-sm space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-bold text-white">Puertos de Video Detectados</h3>
+            <button onclick="scanDevices()" class="text-xs text-blue-400 hover:underline">Re-escanear puertos</button>
+          </div>
+          <div id="device-scan-list" class="text-xs space-y-2 text-slate-300">
+            <p class="text-slate-500">Cargando puertos...</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ══ JAVASCRIPT DEL SISTEMA ═══════════════════════════════════════════════ -->
+  <script>
+    // Variables de Estado
+    let currentTab = 'live';
+    let cameras = {};
+    let metrics = {};
+    let ws = null;
+    let gridCols = 2;
+    let eventsOffset = 0;
+    const eventsLimit = 50;
+    let totalEvents = 0;
+
+    // Instancias de Chart.js
+    let chartHourly = null;
+    let chartDaily = null;
+    let chartPie = null;
+
+    // ── RELOJ EN TIEMPO REAL ────────────────────────────────────────────────
+    setInterval(() => {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('es-MX', { hour12: false });
+      const el = document.getElementById('live-clock');
+      if (el) el.textContent = timeStr;
+      const printDateEl = document.getElementById('print-date');
+      if (printDateEl) printDateEl.textContent = now.toLocaleDateString('es-MX') + ' ' + timeStr;
+    }, 1000);
+
+    // ── NAVEGACIÓN POR PESTAÑAS ─────────────────────────────────────────────
+    function switchTab(tab) {
+      currentTab = tab;
+      ['live', 'analytics', 'events', 'settings'].forEach(t => {
+        const sec = document.getElementById(`tab-${t}`);
+        const btn = document.getElementById(`btn-tab-${t}`);
+        if (t === tab) {
+          sec.classList.remove('hidden');
+          sec.classList.add('flex');
+          btn.classList.add('active');
+        } else {
+          sec.classList.add('hidden');
+          sec.classList.remove('flex');
+          btn.classList.remove('active');
+        }
+      });
+
+      if (tab === 'analytics') {
+        loadAnalyticsData();
+      } else if (tab === 'events') {
+        loadEvents(0);
+      } else if (tab === 'settings') {
+        scanDevices();
+      }
+    }
+
+    // ── WEBSOCKET EN VIVO ───────────────────────────────────────────────────
+    function connectWebSocket() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = `${proto}//${location.host}/ws/metrics`;
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        document.getElementById('conn-dot').className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+        document.getElementById('conn-text').textContent = "Servicio Activo";
+      };
+
+      ws.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data);
+          metrics = data;
+          updateLiveUI();
+        } catch (e) {
+          console.error("Error parseando métricas WS:", e);
+        }
+      };
+
+      ws.onclose = () => {
+        document.getElementById('conn-dot').className = "w-2 h-2 rounded-full bg-red-500";
+        document.getElementById('conn-text').textContent = "Desconectado";
+        setTimeout(connectWebSocket, 3000);
+      };
+    }
+
+    function updateLiveUI() {
+      let totalIn = 0;
+      let totalOut = 0;
+      let activeTracks = 0;
+
+      for (const camId in metrics) {
+        const m = metrics[camId];
+        totalIn += (m.total_in || 0);
+        totalOut += (m.total_out || 0);
+        activeTracks += (m.active_tracks || 0);
+
+        // Actualizar tarjeta del stream si existe
+        const inEl = document.getElementById(`cam-${camId}-in`);
+        const outEl = document.getElementById(`cam-${camId}-out`);
+        const fpsEl = document.getElementById(`cam-${camId}-fps`);
+        if (inEl) inEl.textContent = m.total_in || 0;
+        if (outEl) outEl.textContent = m.total_out || 0;
+        if (fpsEl) fpsEl.textContent = (m.fps_processing || 0) + ' FPS';
+      }
+
+      document.getElementById('kpi-live-in').textContent = totalIn;
+      document.getElementById('kpi-live-out').textContent = totalOut;
+      document.getElementById('kpi-live-total').textContent = totalIn + totalOut;
+      document.getElementById('kpi-live-active').textContent = activeTracks;
+    }
+
+    // ── GESTIÓN DE CÁMARAS Y LAYOUT ─────────────────────────────────────────
+    async function loadCameras() {
+      try {
+        const res = await fetch('/api/cameras');
+        const data = await res.json();
+        cameras = data.cameras || {};
+        renderLiveFeeds();
+        populateCameraSelects();
+      } catch (e) {
+        console.error("Error cargando cámaras:", e);
+      }
+    }
+
+    function renderLiveFeeds() {
+      const grid = document.getElementById('live-grid');
+      grid.innerHTML = '';
+
+      for (const camId in cameras) {
+        const cam = cameras[camId];
+        const card = document.createElement('div');
+        card.className = "bg-brand-900 border border-brand-700/70 rounded-xl overflow-hidden flex flex-col shadow-sm";
+        card.innerHTML = `
+          <div class="px-3.5 py-2 bg-brand-850 border-b border-brand-700/50 flex items-center justify-between text-xs">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full ${cam.connected ? 'bg-emerald-400' : 'bg-red-400'}"></span>
+              <span class="font-bold text-white uppercase tracking-wider">${camId}</span>
+              <span class="text-slate-400 text-[11px]">(${cam.source})</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="text-slate-400 text-[11px]" id="cam-${camId}-fps">-- FPS</span>
+              <button onclick="resetCamCounters('${camId}')" class="text-slate-400 hover:text-amber-400" title="Reiniciar Contadores">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="relative flex-1 bg-black min-h-[260px] flex items-center justify-center">
+            <img src="/video_feed/${camId}" class="w-full h-full object-cover" alt="Feed ${camId}" onerror="this.src='/static/no_signal.png'" />
+          </div>
+          <div class="px-4 py-2.5 bg-brand-900 border-t border-brand-700/50 grid grid-cols-2 gap-2 text-center text-xs">
+            <div class="p-1.5 rounded bg-emerald-950/40 border border-emerald-800/40">
+              <span class="text-[10px] uppercase text-emerald-400 font-semibold block">Entradas</span>
+              <span class="text-base font-extrabold text-emerald-300" id="cam-${camId}-in">0</span>
+            </div>
+            <div class="p-1.5 rounded bg-amber-950/40 border border-amber-800/40">
+              <span class="text-[10px] uppercase text-amber-400 font-semibold block">Salidas</span>
+              <span class="text-base font-extrabold text-amber-300" id="cam-${camId}-out">0</span>
+            </div>
+          </div>
         `;
+        grid.appendChild(card);
+      }
+    }
+
+    function setGridCols(cols) {
+      gridCols = cols;
+      const grid = document.getElementById('live-grid');
+      grid.className = `flex-1 p-3 grid grid-cols-${cols} gap-3 overflow-y-auto`;
+      [1, 2, 3].forEach(c => {
+        const b = document.getElementById(`btn-grid-${c}`);
+        if (c === cols) {
+          b.className = "px-2.5 py-1 text-xs font-medium border border-blue-600 bg-blue-600 text-white";
+        } else {
+          b.className = "px-2.5 py-1 text-xs font-medium border border-brand-700 bg-brand-800 text-slate-300 hover:bg-brand-700";
+        }
       });
     }
-  } catch (err) {
-    usbList.innerHTML = '<p class="text-xs text-red-400">Error al cargar dispositivos.</p>';
-  }
-}
 
-async function addUsbCamera(sourceId) {
-  await submitCameraAdd(sourceId, `cam_usb_${sourceId}`);
-}
+    async function resetCamCounters(camId) {
+      if (!confirm(`¿Deseas reiniciar los contadores de la cámara ${camId}?`)) return;
+      try {
+        await fetch(`/api/reset/${camId}`, { method: 'POST' });
+      } catch (e) {
+        console.error("Error reiniciando contadores:", e);
+      }
+    }
 
-async function addRtspCamera() {
-  const url = document.getElementById('rtsp-url').value.trim();
-  const errorEl = document.getElementById('rtsp-error');
-  if (!url) return;
-  
-  errorEl.classList.add('hidden');
-  const btn = event.currentTarget;
-  const originalText = btn.innerText;
-  btn.innerText = "Verificando...";
-  btn.disabled = true;
-  
-  const camId = `cam_rtsp_${Date.now().toString().slice(-4)}`;
-  
-  try {
-    await submitCameraAdd(url, camId);
-    document.getElementById('rtsp-url').value = '';
-  } catch (err) {
-    errorEl.innerText = err.message || "Error al conectar al stream.";
-    errorEl.classList.remove('hidden');
-  } finally {
-    btn.innerText = originalText;
-    btn.disabled = false;
-  }
-}
+    function populateCameraSelects() {
+      const selects = [document.getElementById('filter-analytics-cam'), document.getElementById('filter-ev-cam')];
+      selects.forEach(sel => {
+        if (!sel) return;
+        const curr = sel.value;
+        sel.innerHTML = '<option value="all">Todas las Cámaras</option>';
+        for (const camId in cameras) {
+          const opt = document.createElement('option');
+          opt.value = camId;
+          opt.textContent = `Canal ${camId}`;
+          sel.appendChild(opt);
+        }
+        sel.value = curr || 'all';
+      });
+    }
 
-async function submitCameraAdd(source, camId) {
-  const res = await fetch('/api/camera/add', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source: source, cam_id: camId })
-  });
-  
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.detail);
-  }
-  
-  // Refrescar modal y reconectar para generar los nuevos feeds visuales
-  fetchDevices();
-  setTimeout(() => window.location.reload(), 1000); // Reload rápido para re-renderizar todo
-}
+    // ── ANALÍTICA HISTÓRICA (CHART.JS) ──────────────────────────────────────
+    async function loadAnalyticsData() {
+      const cam = document.getElementById('filter-analytics-cam').value || 'all';
+      let date = document.getElementById('filter-analytics-date').value;
+      if (!date) {
+        date = new Date().toISOString().split('T')[0];
+        document.getElementById('filter-analytics-date').value = date;
+      }
+      const days = document.getElementById('filter-days-span').value || 7;
 
-init();
-</script>
+      try {
+        // Cargar Resumen de KPIs
+        const resKpi = await fetch(`/api/history/summary?camera_id=${cam}&date=${date}`);
+        const dataKpi = (await resKpi.json()).data;
+        renderKPIs(dataKpi);
+
+        // Cargar Aforo Horario (00:00 - 23:00)
+        const resHourly = await fetch(`/api/history/hourly?camera_id=${cam}&date=${date}`);
+        const dataHourly = (await resHourly.json()).data;
+        renderHourlyChart(dataHourly);
+
+        // Cargar Tendencia Diaria
+        const resDaily = await fetch(`/api/history/daily?camera_id=${cam}&days=${days}`);
+        const dataDaily = (await resDaily.json()).data;
+        renderDailyChart(dataDaily);
+
+        // Renderizar Dona de Composición
+        renderPieChart(dataKpi.vehicle_classes || {});
+      } catch (e) {
+        console.error("Error cargando datos analíticos:", e);
+      }
+    }
+
+    function renderKPIs(kpi) {
+      document.getElementById('stat-total-flow').textContent = kpi.total_flow.toLocaleString();
+      document.getElementById('stat-in-count').textContent = `↑ ${kpi.total_in.toLocaleString()} In`;
+      document.getElementById('stat-out-count').textContent = `↓ ${kpi.total_out.toLocaleString()} Out`;
+      document.getElementById('stat-peak-hour').textContent = kpi.peak_hour || '--:--';
+      document.getElementById('stat-avg-dwell').textContent = `${kpi.avg_dwell_seconds} s`;
+
+      // Calcular proporción de transporte pesado
+      let heavy = 0;
+      let total = kpi.total_flow || 1;
+      if (kpi.vehicle_classes) {
+        heavy += (kpi.vehicle_classes['Camion'] || 0);
+        heavy += (kpi.vehicle_classes['Autobus'] || 0);
+      }
+      const pct = Math.round((heavy / total) * 100);
+      document.getElementById('stat-heavy-percent').textContent = `${pct}%`;
+      document.getElementById('stat-heavy-count').textContent = `${heavy} vehículos de carga y pasajeros`;
+    }
+
+    function renderHourlyChart(hourly) {
+      const ctx = document.getElementById('chart-hourly').getContext('2d');
+      const labels = hourly.map(h => h.hour);
+      const dataIn = hourly.map(h => h.in);
+      const dataOut = hourly.map(h => h.out);
+
+      if (chartHourly) chartHourly.destroy();
+
+      chartHourly = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'Entradas (IN)',
+              data: dataIn,
+              backgroundColor: '#10b981',
+              borderRadius: 4,
+            },
+            {
+              label: 'Salidas (OUT)',
+              data: dataOut,
+              backgroundColor: '#f59e0b',
+              borderRadius: 4,
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#1e293b',
+              titleColor: '#ffffff',
+              bodyColor: '#cbd5e1',
+              borderColor: '#475569',
+              borderWidth: 1,
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(51, 65, 85, 0.4)' },
+              ticks: { color: '#94a3b8', font: { size: 10 } }
+            },
+            y: {
+              grid: { color: 'rgba(51, 65, 85, 0.4)' },
+              ticks: { color: '#94a3b8', font: { size: 10 } },
+              beginAtZero: true
+            }
+          }
+        }
+      });
+    }
+
+    function renderDailyChart(daily) {
+      const ctx = document.getElementById('chart-daily').getContext('2d');
+      const labels = daily.map(d => d.date);
+      const totals = daily.map(d => d.total);
+
+      if (chartDaily) chartDaily.destroy();
+
+      chartDaily = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Volumen Diario Total',
+            data: totals,
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            fill: true,
+            tension: 0.35,
+            pointBackgroundColor: '#2563eb',
+            pointRadius: 4,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#1e293b',
+              titleColor: '#ffffff',
+              bodyColor: '#cbd5e1',
+              borderColor: '#475569',
+              borderWidth: 1,
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(51, 65, 85, 0.4)' },
+              ticks: { color: '#94a3b8', font: { size: 10 } }
+            },
+            y: {
+              grid: { color: 'rgba(51, 65, 85, 0.4)' },
+              ticks: { color: '#94a3b8', font: { size: 10 } },
+              beginAtZero: true
+            }
+          }
+        }
+      });
+    }
+
+    function renderPieChart(classes) {
+      const ctx = document.getElementById('chart-pie').getContext('2d');
+      const labels = Object.keys(classes);
+      const values = Object.values(classes);
+
+      if (chartPie) chartPie.destroy();
+
+      if (labels.length === 0) {
+        labels.push('Sin datos');
+        values.push(1);
+      }
+
+      chartPie = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: values,
+            backgroundColor: [
+              '#3b82f6', // Automovil
+              '#a855f7', // Camion
+              '#f97316', // Autobus
+              '#06b6d4', // Motocicleta
+              '#84cc16', // Bicicleta
+              '#64748b'  // Desconocido
+            ],
+            borderWidth: 2,
+            borderColor: '#0f172a'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: '#cbd5e1', font: { size: 11 }, boxWidth: 12 }
+            },
+            tooltip: {
+              backgroundColor: '#1e293b',
+              titleColor: '#ffffff',
+              bodyColor: '#cbd5e1',
+            }
+          },
+          cutout: '65%'
+        }
+      });
+    }
+
+    // ── REGISTRO DE EVENTOS (BITÁCORA) ──────────────────────────────────────
+    async function loadEvents(offset = 0) {
+      eventsOffset = offset;
+      const cam = document.getElementById('filter-ev-cam').value || 'all';
+      const type = document.getElementById('filter-ev-type').value || 'all';
+      const dir = document.getElementById('filter-ev-dir').value || 'all';
+      const date = document.getElementById('filter-ev-date').value || '';
+
+      let url = `/api/history/events?camera_id=${cam}&vehicle_type=${type}&direction=${dir}&limit=${eventsLimit}&offset=${offset}`;
+      if (date) {
+        url += `&start_date=${date}&end_date=${date}`;
+      }
+
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        const payload = data.data;
+        totalEvents = payload.total;
+        renderEventsTable(payload.events);
+        updateEventsPagination(payload.total, offset, payload.events.length);
+      } catch (e) {
+        console.error("Error cargando eventos:", e);
+      }
+    }
+
+    function renderEventsTable(events) {
+      const tbody = document.getElementById('events-table-body');
+      if (!events || events.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-slate-500">No se encontraron eventos con los filtros seleccionados.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = events.map(ev => {
+        const isEntry = ev.direction === 'IN';
+        const dirBadge = isEntry
+          ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-900/50 text-emerald-400 border border-emerald-700/50">ENTRADA (IN)</span>`
+          : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-900/50 text-amber-400 border border-amber-700/50">SALIDA (OUT)</span>`;
+
+        return `
+          <tr class="hover:bg-brand-850/60 transition">
+            <td class="py-2.5 px-4 font-mono text-slate-300 text-[11px]">${ev.timestamp}</td>
+            <td class="py-2.5 px-4 font-semibold text-white uppercase">${ev.camera_id}</td>
+            <td class="py-2.5 px-4 font-mono text-slate-400">#${ev.track_id}</td>
+            <td class="py-2.5 px-4 font-medium text-blue-300">${ev.vehicle_type}</td>
+            <td class="py-2.5 px-4">${dirBadge}</td>
+            <td class="py-2.5 px-4 text-slate-400">${ev.dwell_time}s</td>
+            <td class="py-2.5 px-4 text-slate-400 font-mono">${Math.round((ev.confidence || 0) * 100)}%</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function updateEventsPagination(total, offset, count) {
+      const info = document.getElementById('events-pagination-info');
+      const start = total === 0 ? 0 : offset + 1;
+      const end = offset + count;
+      info.textContent = `Mostrando ${start} - ${end} de ${total.toLocaleString()} registros`;
+
+      document.getElementById('btn-prev-page').disabled = offset <= 0;
+      document.getElementById('btn-next-page').disabled = offset + count >= total;
+    }
+
+    function prevEventsPage() {
+      if (eventsOffset > 0) {
+        loadEvents(Math.max(0, eventsOffset - eventsLimit));
+      }
+    }
+
+    function nextEventsPage() {
+      if (eventsOffset + eventsLimit < totalEvents) {
+        loadEvents(eventsOffset + eventsLimit);
+      }
+    }
+
+    function exportCSV() {
+      const cam = document.getElementById('filter-ev-cam').value || 'all';
+      const type = document.getElementById('filter-ev-type').value || 'all';
+      const dir = document.getElementById('filter-ev-dir').value || 'all';
+      const date = document.getElementById('filter-ev-date').value || '';
+      
+      let url = `/api/history/export/csv?camera_id=${cam}&vehicle_type=${type}&direction=${dir}`;
+      if (date) {
+        url += `&start_date=${date}&end_date=${date}`;
+      }
+      window.location.href = url;
+    }
+
+    // ── GESTIÓN DE DISPOSITIVOS ─────────────────────────────────────────────
+    async function scanDevices() {
+      const container = document.getElementById('device-scan-list');
+      container.innerHTML = '<p class="text-slate-500">Escaneando puertos de video...</p>';
+
+      try {
+        const res = await fetch('/api/devices');
+        const data = await res.json();
+        const cameras = data.usb_cameras || [];
+
+        if (cameras.length === 0) {
+          container.innerHTML = '<p class="text-slate-500">No se encontraron cámaras USB locales conectadas.</p>';
+          return;
+        }
+
+        container.innerHTML = cameras.map(cam => `
+          <div class="p-3 bg-brand-950 border border-brand-700/60 rounded-lg flex items-center justify-between">
+            <div>
+              <div class="font-bold text-white">${cam.name} (Índice ${cam.index})</div>
+              <div class="text-[11px] text-slate-400">Resolución recomendada: ${cam.resolution || 'Auto'}</div>
+            </div>
+            <button onclick="addDiscoveredCamera(${cam.index})" class="px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs">
+              Vincular
+            </button>
+          </div>
+        `).join('');
+      } catch (e) {
+        container.innerHTML = '<p class="text-red-400">Error al escanear dispositivos.</p>';
+      }
+    }
+
+    function addDiscoveredCamera(index) {
+      document.getElementById('new-cam-id').value = `cam_${index}`;
+      document.getElementById('new-cam-source').value = index;
+    }
+
+    async function submitNewCamera() {
+      const camId = document.getElementById('new-cam-id').value.trim();
+      const sourceRaw = document.getElementById('new-cam-source').value.trim();
+
+      if (!camId || !sourceRaw) {
+        alert("Por favor introduce tanto el ID como la Fuente de video.");
+        return;
+      }
+
+      const source = isNaN(sourceRaw) ? sourceRaw : parseInt(sourceRaw, 10);
+
+      try {
+        const res = await fetch('/api/camera/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cam_id: camId, source: source })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert("Canal de video conectado exitosamente.");
+          document.getElementById('new-cam-id').value = '';
+          document.getElementById('new-cam-source').value = '';
+          await loadCameras();
+          switchTab('live');
+        } else {
+          alert("Error: " + data.detail);
+        }
+      } catch (e) {
+        alert("Error de conexión al agregar cámara.");
+      }
+    }
+
+    // ── INICIALIZACIÓN ──────────────────────────────────────────────────────
+    window.addEventListener('DOMContentLoaded', () => {
+      loadCameras();
+      connectWebSocket();
+      // Inicializar selector de fecha a hoy
+      document.getElementById('filter-analytics-date').value = new Date().toISOString().split('T')[0];
+    });
+  </script>
 </body>
 </html>

@@ -26,8 +26,10 @@ from typing import AsyncGenerator
 import cv2
 import numpy as np
 import uvicorn
+import io
+import csv
 from pydantic import BaseModel
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Response
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from pathlib import Path
 
@@ -35,6 +37,7 @@ import config
 from camera_stream import CameraStream, create_all_streams
 from traffic_analyzer import TrafficAnalyzer, VehicleMetrics
 import camera_manager
+import database
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN DE LOGGING
@@ -88,6 +91,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     global streams, analyzers
 
     logger.info("=== Iniciando sistema de analítica de tráfico ===")
+
+    # ── Inicializar Base de Datos SQLite ───────────────────────────────────────
+    try:
+        database.init_db()
+        logger.info("Base de datos SQLite inicializada correctamente.")
+    except Exception as e:
+        logger.error(f"Error inicializando la base de datos: {e}")
 
     # ── Cargar líneas persistentes (si existen) ──────────────────────────────
     lines_file = Path("lines.json")
@@ -584,6 +594,109 @@ async def api_cameras() -> JSONResponse:
             "reconnect_count": stream.reconnect_count,
         }
     return JSONResponse({"status": "ok", "cameras": cam_status})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINTS DE ANALÍTICA HISTÓRICA Y REGISTRO DE EVENTOS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/history/summary", summary="Resumen ejecutivo de KPIs históricos")
+async def api_history_summary(
+    camera_id: str = Query("all", description="ID de cámara o 'all'"),
+    date: str | None = Query(None, description="Fecha YYYY-MM-DD")
+) -> JSONResponse:
+    """Retorna KPIs ejecutivos: aforo total, in, out, hora pico, tiempo de estancia y composición."""
+    data = database.get_kpis(camera_id=camera_id, date_str=date)
+    return JSONResponse({"status": "ok", "data": data})
+
+
+@app.get("/api/history/hourly", summary="Métricas de aforo por hora (00:00 - 23:00)")
+async def api_history_hourly(
+    camera_id: str = Query("all", description="ID de cámara o 'all'"),
+    date: str | None = Query(None, description="Fecha YYYY-MM-DD")
+) -> JSONResponse:
+    """Retorna la distribución horaria completa para gráficas de barras y detección de horas pico."""
+    data = database.get_hourly_metrics(camera_id=camera_id, date_str=date)
+    return JSONResponse({"status": "ok", "data": data})
+
+
+@app.get("/api/history/daily", summary="Tendencia diaria histórica")
+async def api_history_daily(
+    camera_id: str = Query("all", description="ID de cámara o 'all'"),
+    days: int = Query(7, description="Cantidad de días hacia atrás (7, 14, 30)")
+) -> JSONResponse:
+    """Retorna el volumen total de vehículos por día."""
+    data = database.get_daily_metrics(camera_id=camera_id, days=days)
+    return JSONResponse({"status": "ok", "data": data})
+
+
+@app.get("/api/history/events", summary="Registro filtrado y paginado de eventos de cruce")
+async def api_history_events(
+    camera_id: str = Query("all"),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+    vehicle_type: str = Query("all"),
+    direction: str = Query("all"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0)
+) -> JSONResponse:
+    """Consulta la bitácora de eventos con filtros dinámicos."""
+    data = database.get_events(
+        camera_id=camera_id,
+        start_date=start_date,
+        end_date=end_date,
+        vehicle_type=vehicle_type,
+        direction=direction,
+        limit=limit,
+        offset=offset
+    )
+    return JSONResponse({"status": "ok", "data": data})
+
+
+@app.get("/api/history/export/csv", summary="Exportar eventos a archivo CSV para Excel")
+async def api_history_export_csv(
+    camera_id: str = Query("all"),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+    vehicle_type: str = Query("all"),
+    direction: str = Query("all")
+) -> Response:
+    """Genera y descarga un archivo CSV con el historial de eventos para análisis y auditoría."""
+    data = database.get_events(
+        camera_id=camera_id,
+        start_date=start_date,
+        end_date=end_date,
+        vehicle_type=vehicle_type,
+        direction=direction,
+        limit=5000,
+        offset=0
+    )
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    # Encabezados
+    writer.writerow(["ID", "Fecha_Hora", "Camara", "Track_ID", "Tipo_Vehiculo", "Sentido", "Confianza", "Tiempo_Permanencia_Seg"])
+    
+    for ev in data["events"]:
+        writer.writerow([
+            ev["id"],
+            ev["timestamp"],
+            ev["camera_id"],
+            ev["track_id"],
+            ev["vehicle_type"],
+            ev["direction"],
+            ev["confidence"],
+            ev["dwell_time"]
+        ])
+        
+    csv_content = output.getvalue()
+    filename = f"reporte_aforo_vehicular_{camera_id}_{start_date or 'inicio'}.csv"
+    
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

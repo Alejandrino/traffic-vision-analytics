@@ -23,6 +23,7 @@ import supervision as sv
 from ultralytics import YOLO
 
 import config
+import database
 
 logger = logging.getLogger(__name__)
 
@@ -212,9 +213,39 @@ class TrafficAnalyzer:
                     class_id = int(detections.class_id[i])
                     self._track_class[track_id] = config.CLASS_LABELS.get(class_id, "Desconocido")
 
-        # ── 4. Conteo LineZone ───────────────────────────────────────────────
+        # ── 4. Conteo LineZone y Registro de Eventos ────────────────────────
         if detections.tracker_id is not None:
-            self._line_zone.trigger(detections)
+            crossed_in, crossed_out = self._line_zone.trigger(detections)
+            for i, tid in enumerate(detections.tracker_id):
+                tid = int(tid)
+                v_type = self._track_class.get(tid, "Automovil")
+                conf = float(detections.confidence[i]) if detections.confidence is not None else 0.85
+                dwell = current_time - self._track_first_seen.get(tid, current_time)
+
+                if crossed_in[i]:
+                    try:
+                        database.record_event(
+                            camera_id=self.cam_id,
+                            track_id=tid,
+                            vehicle_type=v_type,
+                            direction="IN",
+                            confidence=conf,
+                            dwell_time=dwell
+                        )
+                    except Exception as e:
+                        logger.error(f"[{self.cam_id}] Error guardando evento IN: {e}")
+                elif crossed_out[i]:
+                    try:
+                        database.record_event(
+                            camera_id=self.cam_id,
+                            track_id=tid,
+                            vehicle_type=v_type,
+                            direction="OUT",
+                            confidence=conf,
+                            dwell_time=dwell
+                        )
+                    except Exception as e:
+                        logger.error(f"[{self.cam_id}] Error guardando evento OUT: {e}")
 
         # Leer conteos acumulados directamente del LineZone más los offsets
         # supervision 0.21+ almacena los conteos en .in_count y .out_count
