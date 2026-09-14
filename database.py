@@ -93,6 +93,36 @@ def init_db() -> None:
             )
         """)
 
+        # Migración de columna client_id en campaigns
+        cursor.execute("PRAGMA table_info(campaigns)")
+        camp_cols = [r["name"] for r in cursor.fetchall()]
+        if "client_id" not in camp_cols:
+            cursor.execute("ALTER TABLE campaigns ADD COLUMN client_id TEXT")
+
+        # ── TABLA DE VIDEOS Y SPOTS PUBLICITARIOS (DETALLE POR VIDEO) ─────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS campaign_videos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                client_id TEXT NOT NULL,
+                video_name TEXT NOT NULL,
+                title TEXT NOT NULL,
+                duration_seconds INTEGER DEFAULT 15,
+                resolution TEXT DEFAULT '1920x1080',
+                fps INTEGER DEFAULT 60,
+                plays_today INTEGER DEFAULT 0,
+                total_plays INTEGER DEFAULT 0,
+                total_impressions INTEGER DEFAULT 0,
+                kwh_consumed REAL DEFAULT 0.0,
+                status TEXT DEFAULT 'En rotación',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_campaign ON campaign_videos(campaign_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_client ON campaign_videos(client_id)")
+
         # ── TABLA DE REPORTES DE SINCRONIZACIÓN EDGE ─────────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS edge_sync_reports (
@@ -532,6 +562,37 @@ def seed_sample_data_if_empty() -> None:
             """)
             conn.commit()
 
+        # Sembrar campañas asociadas a clientes y spots de video si la tabla está vacía
+        cursor.execute("SELECT COUNT(*) as count FROM campaign_videos")
+        if cursor.fetchone()["count"] == 0:
+            today = datetime.date.today()
+            start_d = (today - datetime.timedelta(days=20)).strftime("%Y-%m-%d")
+            end_d = (today + datetime.timedelta(days=20)).strftime("%Y-%m-%d")
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO campaigns (id, name, client, client_id, location_id, start_date, end_date, start_hour, end_hour, spot_seconds, spots_per_hour, status)
+                VALUES 
+                (10, 'Campaña Cerveza Minerva — Edición Artesanal Verano', 'Cervecería Cuauhtémoc Moctezuma', 'cli_cerveceria', 'loc_minerva', ?, ?, 6, 23, 15, 12, 'Activa'),
+                (11, 'Campaña Bohemia Cristal — Maridaje DOOH', 'Cervecería Cuauhtémoc Moctezuma', 'cli_cerveceria', 'loc_periferico', ?, ?, 7, 22, 15, 10, 'Activa'),
+                (12, 'Lanzamiento Nacional Nuevo Nissan Kicks e-POWER', 'Nissan México', 'cli_nissan', 'loc_minerva', ?, ?, 6, 23, 20, 10, 'Activa'),
+                (13, 'Nissan Intelligent Mobility — Seguridad 360', 'Nissan México', 'cli_nissan', 'loc_periferico', ?, ?, 7, 22, 15, 8, 'Activa'),
+                (14, 'Crédito Nómina y Cuenta Digital Banco Azteca', 'Banco Azteca', 'cli_banco', 'loc_periferico', ?, ?, 8, 21, 15, 12, 'Activa'),
+                (15, 'Gran Venta Nocturna Aniversario Liverpool', 'Liverpool México', 'cli_retail', 'loc_minerva', ?, ?, 6, 23, 15, 14, 'Activa')
+            """, (start_d, end_d, start_d, end_d, start_d, end_d, start_d, end_d, start_d, end_d, start_d, end_d))
+
+            cursor.execute("""
+                INSERT INTO campaign_videos (campaign_id, client_id, video_name, title, duration_seconds, resolution, fps, plays_today, total_plays, total_impressions, kwh_consumed, status)
+                VALUES
+                (10, 'cli_cerveceria', 'minerva_ipa_artesanal_15s.mp4', 'Minerva IPA — Especial Verano', 15, '1920x1080', 60, 194, 3880, 18450, 4.8, 'En rotación'),
+                (10, 'cli_cerveceria', 'minerva_stout_imperial_20s.mp4', 'Minerva Stout Imperial Gourmet', 20, '1920x1080', 60, 142, 2840, 13520, 3.5, 'En rotación'),
+                (11, 'cli_cerveceria', 'bohemia_cristal_refrescante_15s.mp4', 'Bohemia Cristal — Refrescante por Naturaleza', 15, '1920x1080', 60, 168, 3360, 16100, 4.1, 'En rotación'),
+                (12, 'cli_nissan', 'nissan_kicks_epower_aceleracion_20s.mp4', 'Nissan Kicks e-POWER — Aceleración 100% Eléctrica', 20, '1920x1080', 60, 180, 3600, 21500, 5.4, 'En rotación'),
+                (13, 'cli_nissan', 'nissan_intelligent_mobility_15s.mp4', 'Nissan Intelligent Mobility — Seguridad 360', 15, '1920x1080', 60, 150, 3000, 16200, 3.9, 'En rotación'),
+                (14, 'cli_banco', 'banco_azteca_credito_nomina_15s.mp4', 'Crédito Nómina Inmediato en tu App', 15, '1920x1080', 60, 175, 3500, 17800, 4.3, 'En rotación'),
+                (15, 'cli_retail', 'liverpool_venta_nocturna_ofertas_15s.mp4', 'Gran Venta Nocturna — Exclusivo Tarjetas', 15, '1920x1080', 60, 210, 4200, 24300, 5.9, 'En rotación')
+            """)
+            conn.commit()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FUNCIONES DE GESTIÓN MULTI-UBICACIÓN Y CAMPAÑAS
@@ -604,26 +665,177 @@ def update_location_solar_config(
         conn.commit()
         return True
 
-def get_campaigns(location_id: Optional[str] = None) -> list[dict[str, Any]]:
-    """Obtiene las campañas publicitarias activas o por ubicación."""
+def get_campaigns(location_id: Optional[str] = None, client_id: Optional[str] = None) -> list[dict[str, Any]]:
+    """Obtiene las campañas publicitarias filtradas opcionalmente por ubicación o cliente."""
     with get_connection() as conn:
         cursor = conn.cursor()
+        query = """
+            SELECT c.*, l.name as location_name, l.screen_area_m2, l.cost_per_kwh,
+                   cl.name as client_name, cl.logo_url as client_logo
+            FROM campaigns c
+            JOIN locations l ON c.location_id = l.id
+            LEFT JOIN clients cl ON c.client_id = cl.id
+            WHERE 1=1
+        """
+        params: list[Any] = []
         if location_id and location_id != "all":
-            cursor.execute("""
-                SELECT c.*, l.name as location_name, l.cost_per_kwh
-                FROM campaigns c
-                JOIN locations l ON c.location_id = l.id
-                WHERE c.location_id = ?
-                ORDER BY c.id DESC
-            """, (location_id,))
-        else:
-            cursor.execute("""
-                SELECT c.*, l.name as location_name, l.cost_per_kwh
-                FROM campaigns c
-                JOIN locations l ON c.location_id = l.id
-                ORDER BY c.id DESC
-            """)
+            query += " AND c.location_id = ?"
+            params.append(location_id)
+        if client_id and client_id != "all":
+            query += " AND c.client_id = ?"
+            params.append(client_id)
+        query += " ORDER BY c.id DESC"
+        cursor.execute(query, params)
         return [dict(r) for r in cursor.fetchall()]
+
+def get_campaign(campaign_id: int) -> Optional[dict[str, Any]]:
+    """Obtiene el detalle de una campaña por ID."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT c.*, l.name as location_name, l.screen_area_m2, l.cost_per_kwh,
+                   cl.name as client_name, cl.logo_url as client_logo
+            FROM campaigns c
+            JOIN locations l ON c.location_id = l.id
+            LEFT JOIN clients cl ON c.client_id = cl.id
+            WHERE c.id = ?
+        """, (campaign_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+def get_campaign_videos(
+    campaign_id: Optional[int] = None,
+    client_id: Optional[str] = None,
+    location_id: Optional[str] = None
+) -> list[dict[str, Any]]:
+    """Obtiene los spots y videos publicitarios desglosados por campaña, cliente o pantalla."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT v.*, c.name as campaign_name, c.location_id,
+                   l.name as location_name, l.screen_area_m2, l.cost_per_kwh,
+                   cl.name as client_name, cl.logo_url as client_logo
+            FROM campaign_videos v
+            JOIN campaigns c ON v.campaign_id = c.id
+            JOIN locations l ON c.location_id = l.id
+            JOIN clients cl ON v.client_id = cl.id
+            WHERE 1=1
+        """
+        params: list[Any] = []
+        if campaign_id:
+            query += " AND v.campaign_id = ?"
+            params.append(campaign_id)
+        if client_id and client_id != "all":
+            query += " AND v.client_id = ?"
+            params.append(client_id)
+        if location_id and location_id != "all":
+            query += " AND c.location_id = ?"
+            params.append(location_id)
+        query += " ORDER BY v.id ASC"
+        cursor.execute(query, params)
+        return [dict(r) for r in cursor.fetchall()]
+
+def add_campaign_video(
+    campaign_id: int,
+    client_id: str,
+    video_name: str,
+    title: str,
+    duration_seconds: int = 15,
+    resolution: str = "1920x1080",
+    fps: int = 60,
+    status: str = "En rotación"
+) -> int:
+    """Registra un nuevo video/spot dentro de una campaña."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO campaign_videos (campaign_id, client_id, video_name, title, duration_seconds, resolution, fps, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (campaign_id, client_id, video_name, title, duration_seconds, resolution, fps, status))
+        conn.commit()
+        return cursor.lastrowid or 0
+
+def get_client_campaign_report(
+    client_id: str,
+    campaign_id: Optional[int] = None,
+    location_id: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Genera el reporte ejecutivo completo para el cliente organizado por:
+    - Campaña
+    - Pantalla (ubicación)
+    - Desglose por Videos / Spots
+    Y presenta los datos limpios de consumo eléctrico de la pantalla (kW, kWh, $ MXN)
+    sin exponer nombres técnicos de hardware interno (Shelly, puertos, relés).
+    """
+    client = get_client(client_id)
+    if not client:
+        clients_list = get_clients()
+        client = clients_list[0] if clients_list else {"id": client_id, "name": "Cliente Corporativo", "logo_url": ""}
+
+    c_id = client["id"]
+    screens = get_client_screens(c_id)
+    if location_id and location_id != "all":
+        screens = [s for s in screens if s["id"] == location_id]
+
+    campaigns = get_campaigns(location_id=location_id, client_id=c_id)
+    if campaign_id:
+        campaigns = [c for c in campaigns if c["id"] == campaign_id]
+        
+    videos = get_campaign_videos(campaign_id=campaign_id, client_id=c_id, location_id=location_id)
+    
+    # Calcular métricas consolidadas
+    total_spots_today = sum(v.get("plays_today", 0) for v in videos)
+    total_spots_all = sum(v.get("total_plays", 0) for v in videos)
+    total_impressions = sum(v.get("total_impressions", 0) for v in videos)
+    total_duration_sec = sum(v.get("total_plays", 0) * v.get("duration_seconds", 15) for v in videos)
+    exposure_hours = round(total_duration_sec / 3600.0, 1)
+
+    # Consumo eléctrico de la pantalla
+    total_kwh = round(sum(v.get("kwh_consumed", 0.0) for v in videos), 2)
+    avg_kwh_cost = 3.85
+    if screens:
+        avg_kwh_cost = sum(s.get("cost_per_kwh", 3.85) for s in screens) / len(screens)
+    energy_cost_mxn = round(total_kwh * avg_kwh_cost, 2)
+    
+    # Calcular costo para cada video individual
+    for v in videos:
+        v["cost_mxn"] = round(float(v.get("kwh_consumed", 0.0)) * avg_kwh_cost, 2)
+
+    # Potencia de pantalla estimada
+    screen_area_total = sum(s.get("screen_area_m2", 32.0) for s in screens) or 32.0
+    estimated_power_kw = round((screen_area_total / 32.0) * 4.2, 2)
+
+    return {
+        "client": client,
+        "client_name": client.get("name", ""),
+        "filters": {
+            "campaign_id": campaign_id,
+            "location_id": location_id
+        },
+        "screens": screens,
+        "campaigns": campaigns,
+        "videos": videos,
+        "summary": {
+            "total_campaigns": len(campaigns),
+            "total_videos": len(videos),
+            "total_spots_today": total_spots_today,
+            "today_plays": total_spots_today,
+            "total_spots_campaign": total_spots_all,
+            "total_plays": total_spots_all,
+            "total_impressions": total_impressions,
+            "estimated_reach_vehicles": int(total_impressions / 1.6),
+            "total_exposure_hours": exposure_hours,
+            "screen_time_hours": exposure_hours,
+            "screen_power_kw": estimated_power_kw,
+            "screen_kw": estimated_power_kw,
+            "campaign_energy_kwh": total_kwh,
+            "energy_cost_mxn": energy_cost_mxn,
+            "campaign_cost_mxn": energy_cost_mxn,
+            "cost_per_kwh": round(avg_kwh_cost, 2),
+            "screen_area_m2": round(screen_area_total, 1)
+        }
+    }
 
 def add_campaign(
     name: str,
@@ -635,15 +847,16 @@ def add_campaign(
     end_hour: int = 23,
     spot_seconds: int = 15,
     spots_per_hour: int = 12,
-    status: str = "Activa"
+    status: str = "Activa",
+    client_id: Optional[str] = None
 ) -> int:
     """Crea una nueva campaña publicitaria."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO campaigns (name, client, location_id, start_date, end_date, start_hour, end_hour, spot_seconds, spots_per_hour, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, client, location_id, start_date, end_date, start_hour, end_hour, spot_seconds, spots_per_hour, status))
+            INSERT INTO campaigns (name, client, client_id, location_id, start_date, end_date, start_hour, end_hour, spot_seconds, spots_per_hour, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, client, client_id, location_id, start_date, end_date, start_hour, end_hour, spot_seconds, spots_per_hour, status))
         conn.commit()
         return cursor.lastrowid or 0
 

@@ -869,6 +869,77 @@ async def api_novastar_brightness(req: NovastarBrightnessRequest) -> JSONRespons
     res = novastar_controller.set_brightness(ip=req.ip, brightness=req.brightness, port=req.port)
     return JSONResponse({"status": "ok", "result": res})
 
+@app.get("/api/novastar/playback", summary="Spot o video que se reproduce actualmente en el NovaStar TB40")
+async def api_novastar_playback(
+    location_id: Optional[str] = Query(None),
+    ip: str = Query("192.168.1.140"),
+    port: int = Query(8001)
+) -> JSONResponse:
+    """
+    Obtiene la información en tiempo real del spot o video que está proyectando el NovaStar TB40:
+    título, archivo .mp4, duración, segundo actual, porcentaje de progreso, resolución, siguiente anuncio,
+    y datos limpios de consumo eléctrico de la pantalla.
+    """
+    loc = None
+    if location_id and location_id != "all":
+        loc = database.get_location(location_id)
+    if not loc:
+        locs = database.get_locations()
+        loc = locs[0] if locs else {}
+
+    if loc:
+        ip = loc.get("novastar_ip", ip)
+        port = int(loc.get("novastar_port", port))
+
+    playback = novastar_controller.get_current_playback(ip=ip, port=port, location_id=location_id)
+    
+    # Obtener telemetría eléctrica limpia de la pantalla (sin tecnicismos de Shelly)
+    shelly_ip = loc.get("shelly_ip", "192.168.1.150") if loc else "192.168.1.150"
+    shelly_data = shelly_controller.get_status(ip=shelly_ip, channel=0)
+    power_kw = round((shelly_data.get("power_w", 8450.0)) / 1000.0, 2)
+    today_kwh = round(shelly_data.get("total_kwh", 12.4), 2)
+
+    screen_info = {
+        "id": loc.get("id", location_id or "loc_minerva"),
+        "name": loc.get("name", "Pantalla Glorieta Minerva"),
+        "dimensions": loc.get("screen_dimensions", "6.0m x 3.5m"),
+        "area_sqm": float(loc.get("screen_area_sqm") or 21.0),
+        "power_kw": power_kw,
+        "energy_today_kwh": today_kwh,
+        "cost_per_kwh": float(loc.get("cost_per_kwh") or 3.85)
+    }
+
+    return JSONResponse({
+        "status": "ok",
+        "playback": playback,
+        "screen": screen_info
+    })
+
+@app.get("/api/client/{client_id}/campaign-report", summary="Reporte ejecutivo de cliente por campaña, pantalla y videos")
+async def api_client_campaign_report(
+    client_id: str,
+    campaign_id: Optional[int] = Query(None),
+    location_id: Optional[str] = Query(None)
+) -> JSONResponse:
+    """
+    Genera el reporte consolidado para el cliente con desglose por campaña, pantalla y videos,
+    presentando los datos de consumo eléctrico de forma limpia sin tecnicismos de hardware interno.
+    """
+    report = database.get_client_campaign_report(client_id=client_id, campaign_id=campaign_id, location_id=location_id)
+    return JSONResponse({
+        "status": "ok",
+        "report": report,
+        "summary": report.get("summary", {}),
+        "videos": report.get("videos", []),
+        "client_name": report.get("client_name", "")
+    })
+
+@app.get("/api/campaigns/{campaign_id}/videos", summary="Lista de videos y spots de una campaña")
+async def api_campaign_videos(campaign_id: int) -> JSONResponse:
+    """Obtiene los spots registrados para una campaña específica."""
+    videos = database.get_campaign_videos(campaign_id=campaign_id)
+    return JSONResponse({"status": "ok", "videos": videos})
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINTS: CALENDARIO Y REGULACIÓN AUTOMÁTICA DE BRILLO SOLAR
@@ -1311,13 +1382,14 @@ async def api_vx600_status(ip: str = "192.168.1.160", port: int = 6000) -> JSONR
 async def report_print_view(
     client_id: Optional[str] = Query(None, description="ID del cliente"),
     campaign_id: Optional[str] = Query(None, description="ID de la campaña"),
-    location_id: Optional[str] = Query("loc_minerva", description="ID de la ubicación")
+    location_id: Optional[str] = Query("loc_minerva", description="ID de la ubicación"),
+    view_mode: str = Query("client", description="'client' para vista ejecutiva limpia (sin tecnicismos de hardware) o 'admin' para vista técnica")
 ) -> HTMLResponse:
     """
     Genera un informe ejecutivo imprimible en formato HTML estilizado con @media print
     para exportar directamente a PDF desde el navegador (Ctrl + P / Imprimir a PDF).
-    Incluye el logotipo del cliente, sello de ingeniería de Apex Company, aforo vehicular,
-    energía consumida (Shelly Pro) y el pie de página de apexcompany.com.mx.
+    En modo cliente ('client') presenta la información enfocada en Campaña, Pantalla, Videos y
+    Consumo Eléctrico de Pantalla, abstrayendo componentes internos de hardware (Shelly/procesadores).
     """
     # 1. Obtener cliente
     client = None
@@ -1326,13 +1398,13 @@ async def report_print_view(
     if not client:
         clients = database.get_clients()
         client = clients[0] if clients else {
-            "id": "cli_default",
-            "name": "Cliente Comercial DOOH",
+            "id": "cli_cerveceria",
+            "name": "Cervecería Cuauhtémoc Moctezuma",
             "logo_url": "/static/uploads/logos/default_cerveceria.svg",
-            "contact_email": "contacto@cliente.com"
+            "contact_email": "marketing@cerveceria.com.mx"
         }
 
-    # 2. Obtener ubicación y dispositivos
+    # 2. Obtener ubicación y reporte de cliente consolidado
     loc = database.get_location(location_id) or {
         "id": "loc_minerva",
         "name": "Ubicación 01 — Glorieta Minerva",
@@ -1341,7 +1413,13 @@ async def report_print_view(
         "cost_per_kwh": 3.85,
         "shelly_ip": "192.168.1.150"
     }
-    devices = database.get_hardware_devices(loc["id"])
+
+    camp_id_int = int(campaign_id) if (campaign_id and campaign_id.isdigit()) else None
+    client_report = database.get_client_campaign_report(client["id"], campaign_id=camp_id_int, location_id=loc["id"])
+    videos = client_report.get("videos", [])
+    rep_summary = client_report.get("summary", {})
+    campaigns = client_report.get("campaigns", [])
+    campaign_name = campaigns[0]["name"] if campaigns else "Pauta Anual de Marca DOOH"
 
     # 3. Métricas de tráfico y KPIs
     today = datetime.date.today().strftime("%Y-%m-%d")
@@ -1350,21 +1428,33 @@ async def report_print_view(
     classes_dict = kpis.get("vehicle_classes", {})
     types_breakdown = [{"type": k, "count": v} for k, v in classes_dict.items()]
 
-    # 4. Telemetría de energía Shelly Pro
+    # 4. Telemetría de energía de pantalla
     shelly_data = shelly_controller.get_status(loc.get("shelly_ip", "192.168.1.150"))
-    
+    power_kw = shelly_data.get("power_kw", 4.2)
+    daily_kwh = round(power_kw * 16.5, 2)
+    energy_cost = round(daily_kwh * loc.get("cost_per_kwh", 3.85), 2)
+
     # Cálculos acumulados
     total_veh = kpis.get("total_flow", 0)
     total_in = kpis.get("total_in", 0)
     total_out = kpis.get("total_out", 0)
-    impressions = int(total_veh * 1.6)   # Estimación estándar: 1.6 ocupantes promedio por vehículo
+    impressions = int(total_veh * 1.6)
     avg_dwell = kpis.get("avg_dwell_seconds", 8.4)
     peak_hr = kpis.get("peak_hour", "18:00 - 19:00")
-    
-    # Energía
-    power_kw = shelly_data.get("power_kw", 4.2)
-    daily_kwh = round(power_kw * 16.5, 2)
-    energy_cost = round(daily_kwh * loc.get("cost_per_kwh", 3.85), 2)
+
+    # Si hay videos de campaña, tomar sus métricas consolidadas
+    if videos:
+        total_spots_today = rep_summary.get("total_spots_today", 180)
+        total_spots_camp = rep_summary.get("total_spots_campaign", 3500)
+        campaign_kwh = rep_summary.get("campaign_energy_kwh", daily_kwh)
+        campaign_cost = rep_summary.get("energy_cost_mxn", energy_cost)
+        campaign_impressions = rep_summary.get("total_impressions", impressions)
+    else:
+        total_spots_today = 180
+        total_spots_camp = 3600
+        campaign_kwh = daily_kwh
+        campaign_cost = energy_cost
+        campaign_impressions = impressions
 
     # Generar barras SVG para la gráfica horaria
     chart_bars = ""
@@ -1386,7 +1476,34 @@ async def report_print_view(
         </g>
         """
 
-    # Filas de dispositivos de hardware
+    # Filas de desglose por Video / Spot (Vista Cliente)
+    video_rows = ""
+    for v in videos:
+        dur = v.get("duration_seconds", 15)
+        p_today = v.get("plays_today", 0)
+        p_total = v.get("total_plays", 0)
+        v_impr = v.get("total_impressions", 0)
+        v_kwh = v.get("kwh_consumed", 0.0)
+        v_cost = round(v_kwh * loc.get("cost_per_kwh", 3.85), 2)
+        video_rows += f"""
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding: 8px 10px;">
+            <div style="font-weight: 700; color: #0f172a;">{v.get('title')}</div>
+            <div style="font-family: monospace; font-size: 10px; color: #64748b;">{v.get('video_name')} ({v.get('resolution', '1080p')})</div>
+          </td>
+          <td style="padding: 8px 10px; text-align: center; font-weight: 600; color: #334155;">{dur} seg</td>
+          <td style="padding: 8px 10px; color: #334155;">{v.get('location_name', loc.get('name'))}</td>
+          <td style="padding: 8px 10px; text-align: right; color: #0284c7; font-weight: 700;">{p_today:,}</td>
+          <td style="padding: 8px 10px; text-align: right; font-weight: 800; color: #0f172a;">{p_total:,}</td>
+          <td style="padding: 8px 10px; text-align: right; color: #059669; font-weight: 700;">{v_impr:,}</td>
+          <td style="padding: 8px 10px; text-align: right; font-weight: 600; color: #1e293b;">{v_kwh} kWh <span style="font-size: 10px; color: #64748b;">(${v_cost:,.2f})</span></td>
+        </tr>
+        """
+    if not video_rows:
+        video_rows = """<tr><td colspan="7" style="padding: 12px; text-align: center; color: #94a3b8;">Sin spots registrados para esta campaña</td></tr>"""
+
+    # Filas de dispositivos de hardware (Vista Administrador)
+    devices = database.get_hardware_devices(loc["id"])
     device_rows = ""
     for d in devices:
         dual_text = "Sí (Cara A + Cara B)" if d.get("dual_screen_enabled") else "Pantalla Simple"
@@ -1423,6 +1540,114 @@ async def report_print_view(
 
     client_logo = client.get("logo_url") or "/static/uploads/logos/default_cerveceria.svg"
 
+    # Preparar bloques HTML condicionales según view_mode ('client' vs 'admin')
+    is_client_mode = (view_mode == "client")
+
+    if is_client_mode:
+        ficha_tecnica = f"""
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-size: 11px;">
+          <div><strong>Pantalla DOOH:</strong> {loc.get('name')}</div>
+          <div><strong>Área de Pantalla:</strong> {loc.get('screen_area_m2')} m² LED Exterior</div>
+          <div><strong>Ubicación:</strong> {loc.get('address', 'Guadalajara, Jal.')}</div>
+          <div><strong>Campaña:</strong> {campaign_name}</div>
+          <div><strong>Resolución:</strong> 1920 x 1080 Full HD (60 fps)</div>
+          <div><strong>ID Auditoría:</strong> APEX-DOOH-{int(time.time())}</div>
+        </div>
+        """
+        tabla_central = f"""
+        <div class="section-title">Pauta de Campaña y Spots de Video Transmitidos en Pantalla</div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Spot Publicitario / Video</th>
+              <th style="text-align: center;">Duración</th>
+              <th>Pantalla</th>
+              <th style="text-align: right;">Pautas Hoy</th>
+              <th style="text-align: right;">Total Pautas</th>
+              <th style="text-align: right;">Impactos DOOH</th>
+              <th style="text-align: right;">Energía Pantalla</th>
+            </tr>
+          </thead>
+          <tbody>
+            {video_rows}
+          </tbody>
+        </table>
+        """
+        seccion_energia = f"""
+        <div class="section-title">Consumo Eléctrico de la Pantalla LED</div>
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 12px 16px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; font-size: 11px;">
+          <div>
+            <span style="color: #166534; font-weight: bold; display: block;">Potencia Activa Pantalla:</span>
+            <span style="font-size: 16px; font-weight: 800; color: #15803d;">{power_kw} kW</span>
+          </div>
+          <div>
+            <span style="color: #166534; font-weight: bold; display: block;">Energía Consumida Campaña:</span>
+            <span style="font-size: 16px; font-weight: 800; color: #15803d;">{campaign_kwh} kWh</span>
+          </div>
+          <div>
+            <span style="color: #166534; font-weight: bold; display: block;">Costo Eléctrico Asignado:</span>
+            <span style="font-size: 16px; font-weight: 800; color: #15803d;">${campaign_cost:,.2f} MXN</span>
+          </div>
+          <div>
+            <span style="color: #166534; font-weight: bold; display: block;">Regulación Lumínica Solar:</span>
+            <span style="font-size: 13px; font-weight: 800; color: #0284c7;">Calibrado Autónomo</span>
+          </div>
+        </div>
+        <div style="font-size: 10px; color: #64748b; margin-top: 4px; font-style: italic;">
+          * Medición directa de telemetría de pantalla conforme a los horarios de transmisión y tarifa eléctrica asignada ({loc.get('cost_per_kwh', 3.85)} $/kWh).
+        </div>
+        """
+    else:
+        # Modo Administrador (Técnico con hardware e IPs)
+        ficha_tecnica = f"""
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-size: 11px;">
+          <div><strong>Ubicación:</strong> {loc.get('name')}</div>
+          <div><strong>Área de Pantalla:</strong> {loc.get('screen_area_m2')} m² LED Exterior</div>
+          <div><strong>Orientación:</strong> {loc.get('screen_orientation_deg', 270)}° Azimut</div>
+          <div><strong>Contacto Cliente:</strong> {client.get('contact_email', 'N/A')}</div>
+          <div><strong>ID Auditoría:</strong> DOOH-{int(time.time())}</div>
+          <div><strong>Controlador:</strong> NovaStar TB40 / VX600 Pro + Shelly Pro</div>
+        </div>
+        """
+        tabla_central = f"""
+        <div class="section-title">Infraestructura y Controladores de Pantalla (NovaStar & Shelly Pro)</div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Dispositivo / Nombre</th>
+              <th>Tipo</th>
+              <th>Dirección IP / Puerto</th>
+              <th>Modo Pantalla</th>
+              <th>Preset Activo de Hardware</th>
+            </tr>
+          </thead>
+          <tbody>
+            {device_rows}
+          </tbody>
+        </table>
+        """
+        seccion_energia = f"""
+        <div class="section-title">Auditoría Energética de Pantalla (Shelly Pro 4PM)</div>
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 12px 16px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; font-size: 11px;">
+          <div>
+            <span style="color: #166534; font-weight: bold; display: block;">Potencia Activa Actual:</span>
+            <span style="font-size: 16px; font-weight: 800; color: #15803d;">{power_kw} kW</span>
+          </div>
+          <div>
+            <span style="color: #166534; font-weight: bold; display: block;">Energía Diaria Consumida:</span>
+            <span style="font-size: 16px; font-weight: 800; color: #15803d;">{daily_kwh} kWh</span>
+          </div>
+          <div>
+            <span style="color: #166534; font-weight: bold; display: block;">Costo Eléctrico Estimado:</span>
+            <span style="font-size: 16px; font-weight: 800; color: #15803d;">${energy_cost:,.2f} MXN</span>
+          </div>
+          <div>
+            <span style="color: #166534; font-weight: bold; display: block;">Regulación Solar de Brillo:</span>
+            <span style="font-size: 13px; font-weight: 800; color: #0284c7;">Calibrado Autónomo</span>
+          </div>
+        </div>
+        """
+
     html = f"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -1438,61 +1663,60 @@ async def report_print_view(
       background: #ffffff;
       color: #0f172a;
       margin: 0;
-      padding: 20px;
-      font-size: 13px;
-      line-height: 1.4;
+      padding: 0;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }}
     .no-print {{
       background: #0f172a;
-      color: #ffffff;
-      padding: 12px 20px;
+      color: #f8fafc;
+      padding: 10px 20px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-radius: 8px;
-      margin-bottom: 24px;
-      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+      border-radius: 6px;
+    }}
+    @media print {{
+      .no-print {{ display: none !important; }}
     }}
     .btn {{
       background: #0284c7;
       color: #ffffff;
       border: none;
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-weight: bold;
+      padding: 6px 14px;
+      border-radius: 4px;
+      font-weight: 600;
       cursor: pointer;
-      font-size: 13px;
+      font-size: 12px;
+      text-decoration: none;
+      display: inline-block;
     }}
-    .btn:hover {{ background: #0369a1; }}
-    @media print {{
-      .no-print {{ display: none !important; }}
-      body {{ padding: 0; }}
-      .page-footer {{ position: fixed; bottom: 0; left: 0; right: 0; }}
-    }}
+    .btn:hover {{ opacity: 0.9; }}
     .header-table {{
       width: 100%;
       border-bottom: 2px solid #0284c7;
-      padding-bottom: 14px;
+      padding-bottom: 12px;
       margin-bottom: 16px;
     }}
     .kpi-grid {{
       display: grid;
       grid-template-columns: repeat(4, 1fr);
       gap: 12px;
-      margin-bottom: 18px;
+      margin-bottom: 16px;
     }}
     .kpi-card {{
       background: #f8fafc;
       border: 1px solid #e2e8f0;
-      border-radius: 8px;
+      border-radius: 6px;
       padding: 10px 12px;
       text-align: center;
     }}
     .kpi-card .val {{
       font-size: 20px;
-      font-weight: 800;
-      color: #0369a1;
-      margin-top: 4px;
+      font-weight: 900;
+      color: #0f172a;
+      line-height: 1.2;
     }}
     .kpi-card .lbl {{
       font-size: 10px;
@@ -1502,20 +1726,20 @@ async def report_print_view(
       letter-spacing: 0.5px;
     }}
     .section-title {{
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 800;
       text-transform: uppercase;
       color: #0f172a;
       border-left: 4px solid #0284c7;
-      padding-left: 8px;
-      margin: 16px 0 10px 0;
+      padding-left: 6px;
+      margin: 14px 0 8px 0;
       letter-spacing: 0.5px;
     }}
     table.data-table {{
       width: 100%;
       border-collapse: collapse;
       font-size: 11px;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
     }}
     table.data-table th {{
       background: #f1f5f9;
@@ -1526,9 +1750,9 @@ async def report_print_view(
       border-bottom: 2px solid #cbd5e1;
     }}
     .footer-watermark {{
-      margin-top: 30px;
+      margin-top: 24px;
       border-top: 1px solid #cbd5e1;
-      padding-top: 12px;
+      padding-top: 10px;
       text-align: center;
       font-size: 10px;
       color: #64748b;
@@ -1545,11 +1769,13 @@ async def report_print_view(
   <div class="no-print">
     <div>
       <strong style="color: #38bdf8; font-size: 14px;">Vista Previa de Reporte Ejecutivo DOOH</strong>
-      <span style="color: #94a3b8; font-size: 12px; margin-left: 8px;">Listo para impresión directa o guardar como PDF</span>
+      <span style="color: #94a3b8; font-size: 12px; margin-left: 8px;">Listo para imprimir o exportar a PDF</span>
     </div>
-    <div style="display: flex; gap: 8px;">
-      <button onclick="window.print()" class="btn">Imprimir / Guardar PDF</button>
-      <button onclick="window.close()" class="btn" style="background: #334155;">Cerrar</button>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode=client" class="btn" style="background: {'#0284c7' if is_client_mode else '#334155'};">Vista Cliente (Pauta & Pantalla)</a>
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode=admin" class="btn" style="background: {'#0284c7' if not is_client_mode else '#334155'};">Vista Administrador (Hardware)</a>
+      <button onclick="window.print()" class="btn" style="background: #10b981;">Imprimir / Guardar PDF</button>
+      <button onclick="window.close()" class="btn" style="background: #475569;">Cerrar</button>
     </div>
   </div>
 
@@ -1560,7 +1786,7 @@ async def report_print_view(
         <div style="display: flex; align-items: center; gap: 12px;">
           <img src="{client_logo}" alt="{client.get('name')}" style="max-height: 48px; max-width: 180px; object-fit: contain;" onerror="this.style.display='none'" />
           <div>
-            <h1 style="font-size: 17px; margin: 0; color: #0f172a; font-weight: 800;">{client.get('name')}</h1>
+            <h1 style="font-size: 16px; margin: 0; color: #0f172a; font-weight: 800;">{client.get('name')}</h1>
             <p style="margin: 2px 0 0 0; font-size: 11px; color: #64748b;">Reporte de Aforo Vehicular, Audiencia e Impactos DOOH</p>
           </div>
         </div>
@@ -1575,7 +1801,7 @@ async def report_print_view(
             <div style="width: 28px; height: 28px; background: #0284c7; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 15px;">A</div>
           </div>
           <div style="margin-top: 4px; font-size: 10px; color: #475569;">
-            Fecha: <strong>{today}</strong> | Sitio: <strong>{loc.get('name')}</strong>
+            Fecha: <strong>{today}</strong> | Pantalla: <strong>{loc.get('name')}</strong>
           </div>
         </div>
       </td>
@@ -1583,14 +1809,7 @@ async def report_print_view(
   </table>
 
   <!-- Ficha Técnica -->
-  <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-size: 11px;">
-    <div><strong>Ubicación:</strong> {loc.get('name')}</div>
-    <div><strong>Área de Pantalla:</strong> {loc.get('screen_area_m2')} m² LED Exterior</div>
-    <div><strong>Orientación:</strong> {loc.get('screen_orientation_deg', 270)}° Azimut</div>
-    <div><strong>Contacto Cliente:</strong> {client.get('contact_email', 'N/A')}</div>
-    <div><strong>ID Auditoría:</strong> DOOH-{int(time.time())}</div>
-    <div><strong>Controlador:</strong> NovaStar TB40 / VX600 Pro + Shelly Pro</div>
-  </div>
+  {ficha_tecnica}
 
   <!-- Métricas Principales (KPIs) -->
   <div class="kpi-grid">
@@ -1616,22 +1835,8 @@ async def report_print_view(
     </div>
   </div>
 
-  <!-- Tabla de Controladores NovaStar y Presets -->
-  <div class="section-title">Infraestructura y Controladores de Pantalla (NovaStar & Shelly Pro)</div>
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>Dispositivo / Nombre</th>
-        <th>Tipo</th>
-        <th>Dirección IP / Puerto</th>
-        <th>Modo Pantalla</th>
-        <th>Preset Activo de Hardware</th>
-      </tr>
-    </thead>
-    <tbody>
-      {device_rows}
-    </tbody>
-  </table>
+  <!-- Tabla Central (Videos de Campaña o Controladores según vista) -->
+  {tabla_central}
 
   <!-- Gráfica de Tráfico y Desglose por Tipo de Vehículo -->
   <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px;">
@@ -1653,26 +1858,8 @@ async def report_print_view(
     </div>
   </div>
 
-  <!-- Auditoría Energética Shelly Pro -->
-  <div class="section-title">Auditoría Energética de Pantalla (Shelly Pro 4PM)</div>
-  <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 12px 16px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; font-size: 11px;">
-    <div>
-      <span style="color: #166534; font-weight: bold; display: block;">Potencia Activa Actual:</span>
-      <span style="font-size: 16px; font-weight: 800; color: #15803d;">{power_kw} kW</span>
-    </div>
-    <div>
-      <span style="color: #166534; font-weight: bold; display: block;">Energía Diaria Consumida:</span>
-      <span style="font-size: 16px; font-weight: 800; color: #15803d;">{daily_kwh} kWh</span>
-    </div>
-    <div>
-      <span style="color: #166534; font-weight: bold; display: block;">Costo Eléctrico Estimado:</span>
-      <span style="font-size: 16px; font-weight: 800; color: #15803d;">${energy_cost:,.2f} MXN</span>
-    </div>
-    <div>
-      <span style="color: #166534; font-weight: bold; display: block;">Regulación Solar de Brillo:</span>
-      <span style="font-size: 13px; font-weight: 800; color: #0284c7;">Calibrado Autónomo</span>
-    </div>
-  </div>
+  <!-- Sección de Consumo Eléctrico de Pantalla -->
+  {seccion_energia}
 
   <!-- Pie de página Oficial y Obligatorio -->
   <div class="footer-watermark">

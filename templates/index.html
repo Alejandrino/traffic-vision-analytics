@@ -678,6 +678,195 @@
         </div>
       </div>
 
+      <!-- ── WIDGET: REPRODUCCIÓN EN TIEMPO REAL (NOVASTAR TB40) ── -->
+      <div class="bg-gradient-to-r from-brand-900 via-brand-850 to-brand-900 border border-blue-500/40 rounded-xl p-5 shadow-lg relative overflow-hidden">
+        <div class="absolute -right-10 -bottom-10 w-48 h-48 bg-blue-600/10 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 pb-3 border-b border-brand-700/60">
+          <div class="flex items-center gap-3">
+            <span class="relative flex h-3 w-3">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+            </span>
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-bold text-white uppercase tracking-wider">Transmitiendo en Pantalla (NovaStar TB40)</h3>
+                <span id="playback-status-badge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/60">EN VIVO</span>
+              </div>
+              <p class="text-xs text-slate-400" id="playback-screen-name">Pantalla Glorieta Minerva — P4 Outdoor (6.0m x 3.5m)</p>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-400">Pantalla:</span>
+            <select id="playback-location-select" onchange="onPlaybackLocationChange()" class="bg-brand-950 border border-brand-700 rounded px-2.5 py-1 text-xs text-blue-300 font-semibold outline-none cursor-pointer">
+              <!-- Poblado dinámicamente -->
+            </select>
+            <button onclick="refreshLivePlayback(true)" class="p-1.5 rounded bg-brand-800 hover:bg-brand-700 text-slate-300 transition" title="Actualizar estado de reproducción">
+              <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Cuerpo del Reproductor -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 mt-4 items-center">
+          
+          <!-- Video Actual y Barra de Progreso (8 cols) -->
+          <div class="lg:col-span-8 space-y-3">
+            <div class="flex flex-col sm:flex-row sm:items-baseline justify-between gap-1">
+              <div>
+                <span class="text-[10px] uppercase font-bold text-purple-400 tracking-wider" id="playback-client-name">Grupo Modelo — Cerveza Corona</span>
+                <h4 class="text-base font-extrabold text-white flex items-center gap-2" id="playback-spot-title">
+                  Spot 1: Campaña Verano Frescura Total
+                </h4>
+                <div class="text-xs font-mono text-slate-400 mt-0.5 flex items-center gap-2">
+                  <span class="text-blue-300" id="playback-video-name">cerveza_corona_verano_spot1.mp4</span>
+                  <span class="text-slate-600">•</span>
+                  <span id="playback-resolution">1920x1080 @ 60fps</span>
+                </div>
+              </div>
+              <div class="text-right">
+                <span class="text-xs font-mono font-bold text-emerald-400" id="playback-timer">00:14 / 00:20</span>
+                <div class="text-[10px] text-slate-400" id="playback-remaining">Restante: 6s</div>
+              </div>
+            </div>
+
+            <!-- Barra de Progreso del Video -->
+            <div class="w-full bg-brand-950 rounded-full h-3.5 overflow-hidden p-0.5 border border-brand-700/80 shadow-inner relative">
+              <div id="playback-progress-bar" class="bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 h-full rounded-full transition-all duration-1000 ease-linear shadow-sm" style="width: 70%"></div>
+            </div>
+
+            <!-- Siguiente Video en Pauta -->
+            <div class="flex items-center justify-between text-xs bg-brand-950/60 px-3 py-1.5 rounded-lg border border-brand-800/70">
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] uppercase font-bold text-slate-500">Siguiente Spot en Pauta:</span>
+                <span class="font-medium text-slate-300" id="playback-next-spot">Nissan Kicks e-POWER 2026</span>
+              </div>
+              <span class="text-[11px] text-blue-400 font-mono" id="playback-next-file">nissan_kicks_epower_spot2.mp4</span>
+            </div>
+          </div>
+
+          <!-- Métricas Limpias de Pantalla y Consumo Eléctrico (4 cols) -->
+          <div class="lg:col-span-4 bg-brand-950/90 rounded-xl p-3.5 border border-brand-700/60 space-y-2">
+            <span class="text-[10px] uppercase tracking-wider font-bold text-slate-400 block">Consumo Eléctrico de la Pantalla</span>
+            <div class="grid grid-cols-2 gap-2">
+              <div class="p-2 rounded-lg bg-brand-900 border border-brand-800">
+                <span class="text-[10px] text-slate-500 block">Potencia Pantalla</span>
+                <div class="text-sm font-extrabold text-amber-400" id="playback-power-kw">8.45 kW</div>
+                <span class="text-[9px] text-slate-400">Medición en línea</span>
+              </div>
+              <div class="p-2 rounded-lg bg-brand-900 border border-brand-800">
+                <span class="text-[10px] text-slate-500 block">Superficie LED</span>
+                <div class="text-sm font-extrabold text-white" id="playback-screen-area">21.0 m²</div>
+                <span class="text-[9px] text-slate-400">P4 Alta Resolución</span>
+              </div>
+            </div>
+            <div class="text-[11px] text-slate-400 flex items-center justify-between pt-1 border-t border-brand-800">
+              <span>Energía acumulada hoy:</span>
+              <span class="font-bold text-emerald-400 font-mono" id="playback-today-kwh">12.40 kWh</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ── SECCIÓN: REPORTE EJECUTIVO POR CAMPAÑA, PANTALLA Y VIDEOS (CLIENTE) ── -->
+      <div class="card-box bg-brand-900 border border-brand-700/60 rounded-xl p-5 shadow-sm space-y-5">
+        
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-brand-700/60 pb-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-blue-400"></span>
+              <h3 class="text-base font-bold text-white tracking-tight">Reporte Ejecutivo por Campaña, Pantalla y Videos</h3>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">Auditoría consolidada de impactos vehiculares, emisiones de video y consumo eléctrico de la pantalla sin detalles internos de hardware.</p>
+          </div>
+
+          <!-- Filtros de Reporte y Botón de Impresión PDF -->
+          <div class="flex items-center gap-2 flex-wrap">
+            <div class="flex items-center gap-1.5 bg-brand-950 px-2.5 py-1.5 rounded-lg border border-brand-700">
+              <label class="text-[11px] text-slate-400">Campaña:</label>
+              <select id="filter-rep-campaign" onchange="onClientReportFilterChange()" class="bg-transparent text-xs text-white outline-none cursor-pointer">
+                <option value="all">Todas las Campañas</option>
+              </select>
+            </div>
+
+            <div class="flex items-center gap-1.5 bg-brand-950 px-2.5 py-1.5 rounded-lg border border-brand-700">
+              <label class="text-[11px] text-slate-400">Pantalla:</label>
+              <select id="filter-rep-location" onchange="onClientReportFilterChange()" class="bg-transparent text-xs text-blue-300 outline-none cursor-pointer">
+                <option value="all">Todas las Pantallas</option>
+              </select>
+            </div>
+
+            <button onclick="openClientReportPDF()" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition" title="Generar e imprimir informe corporativo de campaña en formato PDF">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+              <span>Generar Reporte PDF de Cliente</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Tarjetas Resumen Ejecutivo del Cliente (Consumo Eléctrico de Pantalla y Métricas) -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div class="p-3 bg-brand-950 border border-brand-700/50 rounded-xl">
+            <span class="text-[10px] text-slate-400 uppercase font-semibold block">Impactos DOOH</span>
+            <div class="text-lg font-black text-emerald-400 mt-1" id="kpi-client-impacts">0</div>
+            <span class="text-[10px] text-slate-500">Vehículos expuestos</span>
+          </div>
+
+          <div class="p-3 bg-brand-950 border border-brand-700/50 rounded-xl">
+            <span class="text-[10px] text-slate-400 uppercase font-semibold block">Spots Emitidos</span>
+            <div class="text-lg font-black text-white mt-1" id="kpi-client-spots">0</div>
+            <span class="text-[10px] text-slate-500" id="kpi-client-spots-sub">0 hoy</span>
+          </div>
+
+          <div class="p-3 bg-brand-950 border border-brand-700/50 rounded-xl">
+            <span class="text-[10px] text-slate-400 uppercase font-semibold block">Horas en Pantalla</span>
+            <div class="text-lg font-black text-blue-400 mt-1" id="kpi-client-hours">0.0h</div>
+            <span class="text-[10px] text-slate-500">Exposición acumulada</span>
+          </div>
+
+          <div class="p-3 bg-brand-950 border border-brand-700/50 rounded-xl">
+            <span class="text-[10px] text-slate-400 uppercase font-semibold block">Consumo Pantalla</span>
+            <div class="text-lg font-black text-amber-400 mt-1" id="kpi-client-kwh">0.0 kWh</div>
+            <span class="text-[10px] text-slate-500">Energía de pauta</span>
+          </div>
+
+          <div class="p-3 bg-brand-950 border border-brand-700/50 rounded-xl">
+            <span class="text-[10px] text-slate-400 uppercase font-semibold block">Costo Eléctrico</span>
+            <div class="text-lg font-black text-white mt-1" id="kpi-client-cost">$0 MXN</div>
+            <span class="text-[10px] text-slate-500">Tarifa de plaza</span>
+          </div>
+
+          <div class="p-3 bg-brand-950 border border-brand-700/50 rounded-xl">
+            <span class="text-[10px] text-slate-400 uppercase font-semibold block">Potencia Pantalla</span>
+            <div class="text-lg font-black text-purple-300 mt-1" id="kpi-client-kw">0.0 kW</div>
+            <span class="text-[10px] text-slate-500">Potencia de carga</span>
+          </div>
+        </div>
+
+        <!-- Tabla de Desglose por Videos / Spots -->
+        <div class="overflow-x-auto rounded-lg border border-brand-700/60">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead class="bg-brand-850 text-slate-400 uppercase tracking-wider text-[11px] border-b border-brand-700/60">
+              <tr>
+                <th class="py-2.5 px-4 font-semibold">Video / Spot Comercial</th>
+                <th class="py-2.5 px-4 font-semibold">Duración</th>
+                <th class="py-2.5 px-4 font-semibold text-center">Emisiones Hoy</th>
+                <th class="py-2.5 px-4 font-semibold text-center">Total Emisiones</th>
+                <th class="py-2.5 px-4 font-semibold text-emerald-400">Impactos Vehiculares</th>
+                <th class="py-2.5 px-4 font-semibold text-amber-400">Energía Pantalla (kWh)</th>
+                <th class="py-2.5 px-4 font-semibold text-white">Costo ($ MXN)</th>
+                <th class="py-2.5 px-4 font-semibold text-center">Estado Pauta</th>
+              </tr>
+            </thead>
+            <tbody id="client-videos-table-body" class="divide-y divide-brand-700/40 text-slate-300 bg-brand-950/60">
+              <tr><td colspan="8" class="text-center py-6 text-slate-500">Cargando reporte de videos...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+
       <!-- Cuadrícula de Tarjetas de Campañas -->
       <div id="campaigns-cards-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         <!-- Generado dinámicamente por JavaScript -->
@@ -1127,6 +1316,13 @@
       } else if (tab === 'campaigns') {
         loadCampaignsData();
         loadClientsBranding();
+        refreshLivePlayback(true);
+        loadClientCampaignReport();
+        if (!livePlaybackInterval) {
+          livePlaybackInterval = setInterval(() => {
+            if (currentTab === 'campaigns') refreshLivePlayback();
+          }, 2500);
+        }
       } else if (tab === 'events') {
         loadEvents(0);
       } else if (tab === 'settings') {
@@ -1182,6 +1378,21 @@
       currentClientId = sel ? sel.value : 'all';
       const headerLogo = document.getElementById('header-client-logo');
 
+      // Abstracción de Hardware para el Cliente DOOH:
+      // Si hay un cliente seleccionado (no es Administrador General), ocultar pestañas de Shelly y Dispositivos
+      const btnHardware = document.getElementById('btn-tab-hardware');
+      const btnSettings = document.getElementById('btn-tab-settings');
+      if (currentClientId !== 'all') {
+        if (btnHardware) btnHardware.classList.add('hidden');
+        if (btnSettings) btnSettings.classList.add('hidden');
+        if (currentTab === 'hardware' || currentTab === 'settings') {
+          switchTab('campaigns');
+        }
+      } else {
+        if (btnHardware) btnHardware.classList.remove('hidden');
+        if (btnSettings) btnSettings.classList.remove('hidden');
+      }
+
       if (currentClientId === 'all') {
         if (headerLogo) headerLogo.src = '/static/uploads/logos/apex_logo.svg';
         // Restaurar todas las ubicaciones en el selector
@@ -1221,13 +1432,19 @@
         }
       }
 
+      // Sincronizar filtros de campaña y reporte del cliente
+      populateClientReportFilters();
+
       // Refrescar vistas según la pestaña activa
       if (currentTab === 'live') loadCameras();
       if (currentTab === 'analytics') loadAnalyticsData();
-      if (currentTab === 'hardware') refreshHardwareTelemetry();
-      if (currentTab === 'campaigns') loadCampaignsData();
+      if (currentTab === 'hardware' && currentClientId === 'all') refreshHardwareTelemetry();
+      if (currentTab === 'campaigns') {
+        loadCampaignsData();
+        loadClientCampaignReport();
+      }
       if (currentTab === 'events') loadEvents(0);
-      if (currentTab === 'settings') loadHardwareDevices();
+      if (currentTab === 'settings' && currentClientId === 'all') loadHardwareDevices();
     }
 
     function loadClientsBranding() {
@@ -1323,10 +1540,13 @@
       }
     }
 
-    function openPrintReport(clientId = null, locationId = null) {
+    function openPrintReport(clientId = null, locationId = null, campaignId = null, viewMode = 'client') {
       const cId = clientId || (currentClientId !== 'all' ? currentClientId : (clients[0] ? clients[0].id : 'cli_cerveceria'));
       const lId = locationId || (selectedLocation !== 'all' ? selectedLocation : 'loc_minerva');
-      const url = `/report/print?client_id=${cId}&location_id=${lId}`;
+      let url = `/report/print?client_id=${cId}&location_id=${lId}&view_mode=${viewMode}`;
+      if (campaignId && campaignId !== 'all') {
+        url += `&campaign_id=${campaignId}`;
+      }
       window.open(url, '_blank');
     }
 
@@ -1334,7 +1554,7 @@
       const sel = document.getElementById('brand-client-select');
       const cId = sel ? sel.value : (clients[0] ? clients[0].id : 'cli_cerveceria');
       const lId = selectedLocation !== 'all' ? selectedLocation : 'loc_minerva';
-      openPrintReport(cId, lId);
+      openPrintReport(cId, lId, null, 'client');
     }
 
     // ── GESTIÓN DE DISPOSITIVOS DE HARDWARE (TB40 / VX600 PRO / SHELLY) ─────
@@ -1935,9 +2155,245 @@
       }
     }
 
+    // ── REPRODUCCIÓN EN TIEMPO REAL NOVASTAR TB40 & REPORTE EJECUTIVO CLIENTE ──
+    let livePlaybackInterval = null;
+    let currentPlaybackLocation = 'loc_minerva';
+
+    function formatPlaybackTime(sec) {
+      sec = Math.max(0, Math.floor(sec || 0));
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    async function refreshLivePlayback(manual = false) {
+      const locSel = document.getElementById('playback-location-select');
+      const locId = locSel && locSel.value ? locSel.value : (selectedLocation !== 'all' ? selectedLocation : 'loc_minerva');
+      currentPlaybackLocation = locId;
+
+      try {
+        const res = await fetch(`/api/novastar/playback?location_id=${locId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const pb = data.playback || {};
+        const scr = data.screen || {};
+
+        const nameEl = document.getElementById('playback-screen-name');
+        if (nameEl) nameEl.textContent = `${scr.name || 'Pantalla LED'} — ${scr.dimensions || '6.0m x 3.5m'}`;
+
+        const clientEl = document.getElementById('playback-client-name');
+        if (clientEl) clientEl.textContent = pb.client_name || 'En Rotación DOOH';
+
+        const spotEl = document.getElementById('playback-spot-title');
+        if (spotEl) spotEl.textContent = pb.title || 'Spot Comercial';
+
+        const fileEl = document.getElementById('playback-video-name');
+        if (fileEl) fileEl.textContent = pb.video_name || 'video_spot.mp4';
+
+        const resEl = document.getElementById('playback-resolution');
+        if (resEl) resEl.textContent = `${pb.resolution || '1920x1080'} @ ${pb.fps || 60}fps`;
+
+        const timerEl = document.getElementById('playback-timer');
+        if (timerEl) timerEl.textContent = `${formatPlaybackTime(pb.elapsed_seconds)} / ${formatPlaybackTime(pb.duration_seconds)}`;
+
+        const remEl = document.getElementById('playback-remaining');
+        if (remEl) remEl.textContent = `Restante: ${pb.remaining_seconds || 0}s`;
+
+        const barEl = document.getElementById('playback-progress-bar');
+        if (barEl) barEl.style.width = `${Math.min(100, Math.max(0, pb.progress_percent || 0))}%`;
+
+        const nxt = pb.next_video || {};
+        const nextTitleEl = document.getElementById('playback-next-spot');
+        if (nextTitleEl) nextTitleEl.textContent = nxt.title || 'Siguiente en pauta';
+
+        const nextFileEl = document.getElementById('playback-next-file');
+        if (nextFileEl) nextFileEl.textContent = nxt.video_name || '';
+
+        // Métricas de pantalla (Consumo eléctrico limpio, sin Shelly técnico)
+        const powEl = document.getElementById('playback-power-kw');
+        if (powEl) powEl.textContent = `${(scr.power_kw || 8.45).toFixed(2)} kW`;
+
+        const areaEl = document.getElementById('playback-screen-area');
+        if (areaEl) areaEl.textContent = `${(scr.area_sqm || 21.0).toFixed(1)} m²`;
+
+        const kwhEl = document.getElementById('playback-today-kwh');
+        if (kwhEl) kwhEl.textContent = `${(scr.energy_today_kwh || 12.40).toFixed(2)} kWh`;
+
+        const badge = document.getElementById('playback-status-badge');
+        if (badge) {
+          if (pb.is_playing !== false) {
+            badge.textContent = 'EN TRANSMISIÓN';
+            badge.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/60';
+          } else {
+            badge.textContent = 'PAUSADO';
+            badge.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/60';
+          }
+        }
+      } catch (e) {
+        console.error("Error consultando reproducción en vivo:", e);
+      }
+    }
+
+    function onPlaybackLocationChange() {
+      refreshLivePlayback(true);
+    }
+
+    // ── REPORTE EJECUTIVO POR CLIENTE, CAMPAÑA Y PANTALLA ──
+    async function populateClientReportFilters() {
+      const campSel = document.getElementById('filter-rep-campaign');
+      const locSel = document.getElementById('filter-rep-location');
+      const pbLocSel = document.getElementById('playback-location-select');
+
+      if (locSel) {
+        const curLoc = locSel.value || 'all';
+        locSel.innerHTML = '<option value="all">Todas las Pantallas</option>';
+        locations.forEach(loc => {
+          const opt = document.createElement('option');
+          opt.value = loc.id;
+          opt.textContent = loc.name;
+          locSel.appendChild(opt);
+        });
+        locSel.value = curLoc;
+      }
+
+      if (pbLocSel) {
+        const curPbLoc = pbLocSel.value || (selectedLocation !== 'all' ? selectedLocation : 'loc_minerva');
+        pbLocSel.innerHTML = '';
+        locations.forEach(loc => {
+          const opt = document.createElement('option');
+          opt.value = loc.id;
+          opt.textContent = loc.name;
+          pbLocSel.appendChild(opt);
+        });
+        pbLocSel.value = curPbLoc;
+      }
+
+      const activeClientId = currentClientId !== 'all' ? currentClientId : null;
+      let url = '/api/campaigns';
+      if (activeClientId) url += `?client_id=${activeClientId}`;
+
+      try {
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          const camps = data.campaigns || [];
+          if (campSel) {
+            const curCamp = campSel.value || 'all';
+            campSel.innerHTML = '<option value="all">Todas las Campañas</option>';
+            camps.forEach(c => {
+              const opt = document.createElement('option');
+              opt.value = c.id;
+              opt.textContent = `${c.name} (${c.client})`;
+              campSel.appendChild(opt);
+            });
+            campSel.value = curCamp;
+          }
+        }
+      } catch (e) {
+        console.error("Error al cargar campañas para filtros:", e);
+      }
+    }
+
+    async function loadClientCampaignReport() {
+      const activeClientId = currentClientId !== 'all' ? currentClientId : (clients[0] ? clients[0].id : 'cli_cerveceria');
+      const campSel = document.getElementById('filter-rep-campaign');
+      const locSel = document.getElementById('filter-rep-location');
+
+      const campId = campSel && campSel.value !== 'all' ? campSel.value : '';
+      const locId = locSel && locSel.value !== 'all' ? locSel.value : '';
+
+      let url = `/api/client/${activeClientId}/campaign-report`;
+      const params = [];
+      if (campId) params.push(`campaign_id=${campId}`);
+      if (locId) params.push(`location_id=${locId}`);
+      if (params.length > 0) url += `?${params.join('&')}`;
+
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        const summary = data.summary || {};
+        const videos = data.videos || [];
+
+        // Actualizar KPIs de Cliente (Consumo de pantalla y métricas limpias)
+        const kpiImpacts = document.getElementById('kpi-client-impacts');
+        if (kpiImpacts) kpiImpacts.textContent = (summary.total_impressions || 0).toLocaleString();
+
+        const kpiSpots = document.getElementById('kpi-client-spots');
+        if (kpiSpots) kpiSpots.textContent = (summary.total_plays || 0).toLocaleString();
+
+        const kpiSpotsSub = document.getElementById('kpi-client-spots-sub');
+        if (kpiSpotsSub) kpiSpotsSub.textContent = `${(summary.today_plays || 0).toLocaleString()} hoy`;
+
+        const kpiHours = document.getElementById('kpi-client-hours');
+        if (kpiHours) kpiHours.textContent = `${(summary.screen_time_hours || 0).toFixed(1)}h`;
+
+        const kpiKwh = document.getElementById('kpi-client-kwh');
+        if (kpiKwh) kpiKwh.textContent = `${(summary.campaign_energy_kwh || 0).toFixed(2)} kWh`;
+
+        const kpiCost = document.getElementById('kpi-client-cost');
+        if (kpiCost) kpiCost.textContent = `$${(summary.campaign_cost_mxn || 0).toLocaleString()} MXN`;
+
+        const kpiKw = document.getElementById('kpi-client-kw');
+        if (kpiKw) kpiKw.textContent = `${(summary.screen_kw || 0).toFixed(2)} kW`;
+
+        // Renderizar tabla de videos
+        const tbody = document.getElementById('client-videos-table-body');
+        if (!tbody) return;
+
+        if (videos.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="8" class="text-center py-6 text-slate-500">No hay videos registrados para los filtros seleccionados.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = videos.map((v, idx) => {
+          const isCurrent = idx === 0;
+          const statusBadge = isCurrent
+            ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800 animate-pulse">🟢 EN TRANSMISIÓN</span>`
+            : `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-950 text-blue-400 border border-blue-800">⏱️ EN PAUTA</span>`;
+
+          return `
+            <tr class="hover:bg-brand-850/60 transition ${isCurrent ? 'bg-blue-950/20' : ''}">
+              <td class="py-2.5 px-4">
+                <div class="font-bold text-white">${v.title || v.video_name}</div>
+                <div class="text-[11px] font-mono text-blue-400">${v.video_name}</div>
+              </td>
+              <td class="py-2.5 px-4 font-mono text-slate-300">${v.duration_seconds}s</td>
+              <td class="py-2.5 px-4 font-bold text-center text-white">${(v.plays_today || 0).toLocaleString()}</td>
+              <td class="py-2.5 px-4 font-semibold text-center text-slate-300">${(v.total_plays || 0).toLocaleString()}</td>
+              <td class="py-2.5 px-4 font-bold text-emerald-400">${(v.total_impressions || 0).toLocaleString()}</td>
+              <td class="py-2.5 px-4 font-bold text-amber-400">${(v.kwh_consumed || 0).toFixed(2)} kWh</td>
+              <td class="py-2.5 px-4 font-extrabold text-white">$${(v.cost_mxn || 0).toLocaleString()}</td>
+              <td class="py-2.5 px-4 text-center">${statusBadge}</td>
+            </tr>
+          `;
+        }).join('');
+
+      } catch (e) {
+        console.error("Error al cargar reporte de cliente:", e);
+      }
+    }
+
+    function onClientReportFilterChange() {
+      loadClientCampaignReport();
+    }
+
+    function openClientReportPDF() {
+      const activeClientId = currentClientId !== 'all' ? currentClientId : (clients[0] ? clients[0].id : 'cli_cerveceria');
+      const campSel = document.getElementById('filter-rep-campaign');
+      const locSel = document.getElementById('filter-rep-location');
+      const campId = campSel ? campSel.value : 'all';
+      const locId = locSel ? locSel.value : 'all';
+      openPrintReport(activeClientId, locId === 'all' ? null : locId, campId === 'all' ? null : campId, 'client');
+    }
+
     // ── CAMPAÑAS PUBLICITARIAS Y CONSUMO ENERGÉTICO ─────────────────────────
     async function loadCampaignsData() {
       try {
+        await populateClientReportFilters();
+        await refreshLivePlayback();
+        await loadClientCampaignReport();
+
         const res = await fetch(`/api/campaigns/summary?location_id=${selectedLocation}`);
         const data = await res.json();
         const campaigns = data.data || [];
