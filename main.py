@@ -21,7 +21,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 import cv2
 import numpy as np
@@ -41,6 +41,7 @@ import database
 import novastar_controller
 import shelly_controller
 import campaign_manager
+import solar_brightness_engine
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN DE LOGGING
@@ -129,6 +130,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # ── Lanzar loop de inferencia en background ──────────────────────────────
     inference_task = asyncio.create_task(inference_loop())
     broadcast_task = asyncio.create_task(broadcast_metrics_loop())
+    solar_task = asyncio.create_task(solar_auto_brightness_loop())
 
     logger.info("=== Sistema listo. Servidor escuchando... ===")
 
@@ -138,6 +140,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     logger.info("=== Deteniendo sistema... ===")
     inference_task.cancel()
     broadcast_task.cancel()
+    solar_task.cancel()
 
     for cam_id, stream in streams.items():
         stream.stop()
@@ -255,6 +258,47 @@ async def broadcast_metrics_loop() -> None:
         for ws in disconnected:
             ws_clients.remove(ws)
             logger.info("Cliente WebSocket desconectado y removido de la lista.")
+
+
+async def solar_auto_brightness_loop() -> None:
+    """
+    Loop en background que ajusta periódicamente el brillo del Novastar TB40
+    conforme a la posición solar y orientación de la pantalla de cada ubicación activa.
+    """
+    logger.info("Iniciando loop de autorregulación solar de brillo...")
+    last_applied_brightness: dict[str, int] = {}
+    
+    while True:
+        try:
+            locs = database.get_locations()
+            for loc in locs:
+                loc_id = loc["id"]
+                auto_enabled = bool(loc.get("auto_brightness_enabled", 1))
+                if not auto_enabled:
+                    continue
+
+                lat = float(loc.get("latitude") or 20.6736)
+                lon = float(loc.get("longitude") or -103.3855)
+                orientation = float(loc.get("screen_orientation_deg") or 270.0)
+                min_b = int(loc.get("min_night_brightness") or 25)
+                max_b = int(loc.get("max_day_brightness") or 95)
+                nova_ip = loc.get("novastar_ip", "192.168.1.140")
+                nova_port = int(loc.get("novastar_port", 8001))
+
+                pos = solar_brightness_engine.calculate_solar_position(lat, lon)
+                calc = solar_brightness_engine.compute_target_brightness(
+                    pos["elevation_deg"], pos["azimuth_deg"], orientation, min_b, max_b
+                )
+                target = calc["recommended_brightness"]
+
+                if last_applied_brightness.get(loc_id) != target:
+                    logger.info(f"[SOLAR-AUTO] Ajustando pantalla '{loc_id}' ({orientation}° azimut) a {target}% ({calc['condition']})")
+                    novastar_controller.set_brightness(ip=nova_ip, brightness=target, port=nova_port)
+                    last_applied_brightness[loc_id] = target
+        except Exception as e:
+            logger.debug(f"Error en loop solar auto: {e}")
+            
+        await asyncio.sleep(60.0)  # Verificar cada 60 segundos
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -758,6 +802,168 @@ async def api_novastar_brightness(req: NovastarBrightnessRequest) -> JSONRespons
     """Regula el nivel de brillo de la pantalla LED."""
     res = novastar_controller.set_brightness(ip=req.ip, brightness=req.brightness, port=req.port)
     return JSONResponse({"status": "ok", "result": res})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINTS: CALENDARIO Y REGULACIÓN AUTOMÁTICA DE BRILLO SOLAR
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/solar/status", summary="Posición solar y brillo recomendado por orientación")
+async def api_solar_status(location_id: str = Query("loc_minerva")) -> JSONResponse:
+    """
+    Calcula la posición astronómica del sol actual y el nivel de brillo óptimo
+    en función de la orientación física de la pantalla.
+    """
+    loc = database.get_location(location_id)
+    if not loc:
+        locs = database.get_locations()
+        loc = locs[0] if locs else {
+            "latitude": 20.6736, "longitude": -103.3855, "screen_orientation_deg": 270.0,
+            "min_night_brightness": 25, "max_day_brightness": 95, "auto_brightness_enabled": 1
+        }
+        
+    lat = float(loc.get("latitude") or 20.6736)
+    lon = float(loc.get("longitude") or -103.3855)
+    orientation = float(loc.get("screen_orientation_deg") or 270.0)
+    min_b = int(loc.get("min_night_brightness") or 25)
+    max_b = int(loc.get("max_day_brightness") or 95)
+    auto_b = int(loc.get("auto_brightness_enabled") or 1)
+
+    solar_pos = solar_brightness_engine.calculate_solar_position(lat, lon)
+    ephem = solar_brightness_engine.calculate_sun_ephemeris(lat, lon)
+    bright = solar_brightness_engine.compute_target_brightness(
+        solar_elevation_deg=solar_pos["elevation_deg"],
+        solar_azimuth_deg=solar_pos["azimuth_deg"],
+        screen_orientation_deg=orientation,
+        min_night_brightness=min_b,
+        max_day_brightness=max_b
+    )
+    cardinal = solar_brightness_engine._get_cardinal_label(orientation)
+
+    return JSONResponse({
+        "status": "ok",
+        "location_id": location_id,
+        "location_name": loc.get("name", location_id),
+        "coordinates": {"lat": lat, "lon": lon},
+        "orientation": {"degrees": orientation, "cardinal": cardinal},
+        "solar": solar_pos,
+        "ephemeris": ephem,
+        "brightness": bright,
+        "auto_brightness_enabled": bool(auto_b)
+    })
+
+@app.get("/api/solar/schedule", summary="Curva horaria de 24 horas y calendario solar")
+async def api_solar_schedule(location_id: str = Query("loc_minerva")) -> JSONResponse:
+    """Retorna la curva de proyección solar de 24 horas desglosada cada 30 minutos."""
+    loc = database.get_location(location_id)
+    if not loc:
+        locs = database.get_locations()
+        loc = locs[0] if locs else {
+            "latitude": 20.6736, "longitude": -103.3855, "screen_orientation_deg": 270.0,
+            "min_night_brightness": 25, "max_day_brightness": 95
+        }
+        
+    lat = float(loc.get("latitude") or 20.6736)
+    lon = float(loc.get("longitude") or -103.3855)
+    orientation = float(loc.get("screen_orientation_deg") or 270.0)
+    min_b = int(loc.get("min_night_brightness") or 25)
+    max_b = int(loc.get("max_day_brightness") or 95)
+
+    sched = solar_brightness_engine.generate_24h_solar_schedule(
+        lat=lat,
+        lon=lon,
+        screen_orientation_deg=orientation,
+        min_night_brightness=min_b,
+        max_day_brightness=max_b
+    )
+    return JSONResponse({
+        "status": "ok",
+        "location_id": location_id,
+        "schedule": sched
+    })
+
+class SolarConfigRequest(BaseModel):
+    location_id: str
+    screen_orientation_deg: float
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    min_night_brightness: Optional[int] = None
+    max_day_brightness: Optional[int] = None
+    auto_brightness_enabled: Optional[bool] = None
+
+@app.post("/api/solar/config", summary="Actualizar orientación y parámetros solares de la pantalla")
+async def api_solar_config(req: SolarConfigRequest) -> JSONResponse:
+    """Guarda la orientación angular (° azimut) y límites de brillo."""
+    auto_int = 1 if req.auto_brightness_enabled is True else (0 if req.auto_brightness_enabled is False else None)
+    success = database.update_location_solar_config(
+        loc_id=req.location_id,
+        screen_orientation_deg=req.screen_orientation_deg,
+        latitude=req.latitude,
+        longitude=req.longitude,
+        min_night_brightness=req.min_night_brightness,
+        max_day_brightness=req.max_day_brightness,
+        auto_brightness_enabled=auto_int
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Ubicación no encontrada.")
+
+    applied_br = None
+    if req.auto_brightness_enabled:
+        loc = database.get_location(req.location_id)
+        if loc:
+            pos = solar_brightness_engine.calculate_solar_position(loc["latitude"], loc["longitude"])
+            calc = solar_brightness_engine.compute_target_brightness(
+                pos["elevation_deg"], pos["azimuth_deg"], req.screen_orientation_deg,
+                loc["min_night_brightness"], loc["max_day_brightness"]
+            )
+            applied_br = calc["recommended_brightness"]
+            novastar_controller.set_brightness(
+                ip=loc.get("novastar_ip", "192.168.1.140"),
+                brightness=applied_br,
+                port=loc.get("novastar_port", 8001)
+            )
+
+    return JSONResponse({
+        "status": "ok",
+        "message": "Configuración solar y orientación guardadas satisfactoriamente.",
+        "applied_brightness": applied_br
+    })
+
+class SolarApplyRequest(BaseModel):
+    location_id: str
+
+@app.post("/api/solar/apply-now", summary="Ajustar inmediatamente pantalla según posición solar actual")
+async def api_solar_apply_now(req: SolarApplyRequest) -> JSONResponse:
+    """Calcula en tiempo real y empuja el brillo solar al Novastar TB40."""
+    loc = database.get_location(req.location_id)
+    if not loc:
+        raise HTTPException(status_code=404, detail="Ubicación no encontrada.")
+
+    lat = float(loc.get("latitude") or 20.6736)
+    lon = float(loc.get("longitude") or -103.3855)
+    orientation = float(loc.get("screen_orientation_deg") or 270.0)
+    min_b = int(loc.get("min_night_brightness") or 25)
+    max_b = int(loc.get("max_day_brightness") or 95)
+
+    pos = solar_brightness_engine.calculate_solar_position(lat, lon)
+    calc = solar_brightness_engine.compute_target_brightness(
+        pos["elevation_deg"], pos["azimuth_deg"], orientation, min_b, max_b
+    )
+    target_br = calc["recommended_brightness"]
+    
+    res = novastar_controller.set_brightness(
+        ip=loc.get("novastar_ip", "192.168.1.140"),
+        brightness=target_br,
+        port=loc.get("novastar_port", 8001)
+    )
+    
+    return JSONResponse({
+        "status": "ok",
+        "location_id": req.location_id,
+        "target_brightness": target_br,
+        "condition": calc["condition"],
+        "novastar_result": res
+    })
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -59,6 +59,22 @@ def init_db() -> None:
             )
         """)
 
+        # Migración dinámica de columnas geográficas y de orientación solar si no existen
+        cursor.execute("PRAGMA table_info(locations)")
+        loc_cols = [r["name"] for r in cursor.fetchall()]
+        if "latitude" not in loc_cols:
+            cursor.execute("ALTER TABLE locations ADD COLUMN latitude REAL DEFAULT 20.6736")
+        if "longitude" not in loc_cols:
+            cursor.execute("ALTER TABLE locations ADD COLUMN longitude REAL DEFAULT -103.3855")
+        if "screen_orientation_deg" not in loc_cols:
+            cursor.execute("ALTER TABLE locations ADD COLUMN screen_orientation_deg REAL DEFAULT 270.0")
+        if "min_night_brightness" not in loc_cols:
+            cursor.execute("ALTER TABLE locations ADD COLUMN min_night_brightness INTEGER DEFAULT 25")
+        if "max_day_brightness" not in loc_cols:
+            cursor.execute("ALTER TABLE locations ADD COLUMN max_day_brightness INTEGER DEFAULT 95")
+        if "auto_brightness_enabled" not in loc_cols:
+            cursor.execute("ALTER TABLE locations ADD COLUMN auto_brightness_enabled INTEGER DEFAULT 1")
+
         # ── TABLA DE CAMPAÑAS PUBLICITARIAS Y PAUTAS ─────────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS campaigns (
@@ -478,6 +494,37 @@ def add_location(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (loc_id, name, address, novastar_ip, novastar_port, shelly_ip, shelly_channel, screen_area_m2, cost_per_kwh))
         conn.commit()
+
+def update_location_solar_config(
+    loc_id: str,
+    screen_orientation_deg: float,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+    min_night_brightness: Optional[int] = None,
+    max_day_brightness: Optional[int] = None,
+    auto_brightness_enabled: Optional[int] = None
+) -> bool:
+    """Actualiza los parámetros solares, orientación y límites de brillo de una ubicación."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM locations WHERE id = ?", (loc_id,))
+        current = cursor.fetchone()
+        if not current:
+            return False
+
+        lat = latitude if latitude is not None else (current["latitude"] if "latitude" in current.keys() else 20.6736)
+        lon = longitude if longitude is not None else (current["longitude"] if "longitude" in current.keys() else -103.3855)
+        min_b = min_night_brightness if min_night_brightness is not None else (current["min_night_brightness"] if "min_night_brightness" in current.keys() else 25)
+        max_b = max_day_brightness if max_day_brightness is not None else (current["max_day_brightness"] if "max_day_brightness" in current.keys() else 95)
+        auto_b = auto_brightness_enabled if auto_brightness_enabled is not None else (current["auto_brightness_enabled"] if "auto_brightness_enabled" in current.keys() else 1)
+
+        cursor.execute("""
+            UPDATE locations 
+            SET screen_orientation_deg = ?, latitude = ?, longitude = ?, min_night_brightness = ?, max_day_brightness = ?, auto_brightness_enabled = ?
+            WHERE id = ?
+        """, (screen_orientation_deg, lat, lon, min_b, max_b, auto_b, loc_id))
+        conn.commit()
+        return True
 
 def get_campaigns(location_id: Optional[str] = None) -> list[dict[str, Any]]:
     """Obtiene las campañas publicitarias activas o por ubicación."""

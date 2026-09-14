@@ -506,6 +506,132 @@
 
       </div>
 
+      <!-- ── SECCIÓN 2: CALENDARIO DE BRILLO SOLAR Y ORIENTACIÓN DE PANTALLA ── -->
+      <div class="mt-8 pt-6 border-t border-brand-700/60 space-y-5">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+              <h3 class="text-base font-bold text-white tracking-tight">Calendario de Brillo Solar y Orientación de Pantalla</h3>
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/50">AUTÓNOMO GEOGRÁFICO</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-1">Regulación dinámica del NovaStar TB40 calculada por astronomía solar (latitud/longitud) y ángulo de incidencia frontal sobre la cara LED.</p>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <label class="flex items-center gap-2 cursor-pointer bg-brand-900 border border-brand-700/70 px-3 py-1.5 rounded-lg text-xs">
+              <input type="checkbox" id="solar-auto-toggle" onchange="toggleSolarAutoMode(this.checked)" class="w-4 h-4 accent-amber-500 rounded cursor-pointer" checked />
+              <span class="text-slate-200 font-semibold">Modo Solar Automático</span>
+            </label>
+            <button onclick="applySolarNow()" class="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs shadow-sm transition flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+              Sincronizar Brillo Solar Ahora
+            </button>
+          </div>
+        </div>
+
+        <!-- Fila de Tarjetas de Diagnóstico Solar y Orientación -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <!-- Tarjeta 1: Posición Solar Actual -->
+          <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-4 shadow-sm">
+            <span class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 block mb-1">Posición Solar Actual</span>
+            <div class="flex items-baseline gap-2">
+              <span id="solar-elev-val" class="text-xl font-extrabold text-amber-400">--°</span>
+              <span class="text-xs text-slate-400">elevación</span>
+            </div>
+            <div class="mt-2 text-[11px] text-slate-300 space-y-1">
+              <div class="flex justify-between"><span class="text-slate-500">Azimut Solar:</span><span id="solar-az-val" class="font-mono text-white">--°</span></div>
+              <div class="flex justify-between"><span class="text-slate-500">Hora Solar Verdadera:</span><span id="solar-time-val" class="font-mono text-amber-300">--:--</span></div>
+            </div>
+          </div>
+
+          <!-- Tarjeta 2: Efemérides (Amanecer / Ocaso) -->
+          <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-4 shadow-sm">
+            <span class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 block mb-1">Efemérides Solares (Hoy)</span>
+            <div class="mt-1 space-y-1.5 text-xs">
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400 flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> Amanecer:</span>
+                <span id="solar-sunrise" class="font-mono font-bold text-white">--:--</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400 flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-yellow-400"></span> Mediodía (Cenit):</span>
+                <span id="solar-noon" class="font-mono font-bold text-white">--:--</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400 flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-orange-400"></span> Atardecer:</span>
+                <span id="solar-sunset" class="font-mono font-bold text-white">--:--</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tarjeta 3: Orientación Física de la Pantalla -->
+          <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[10px] uppercase tracking-wider font-semibold text-slate-400">Orientación Cara LED</span>
+                <span id="screen-orientation-badge" class="font-mono text-xs font-bold text-blue-300">--°</span>
+              </div>
+              <p id="screen-orientation-label" class="text-xs font-semibold text-white mb-2">Poniente (270°)</p>
+              
+              <!-- Presets Rápidos -->
+              <div class="grid grid-cols-4 gap-1 text-[10px] text-center font-bold">
+                <button onclick="setOrientationPreset(0)" class="p-1 rounded bg-brand-950 hover:bg-blue-900/40 text-slate-300 border border-brand-700">N (0°)</button>
+                <button onclick="setOrientationPreset(90)" class="p-1 rounded bg-brand-950 hover:bg-blue-900/40 text-slate-300 border border-brand-700">E (90°)</button>
+                <button onclick="setOrientationPreset(180)" class="p-1 rounded bg-brand-950 hover:bg-blue-900/40 text-slate-300 border border-brand-700">S (180°)</button>
+                <button onclick="setOrientationPreset(270)" class="p-1 rounded bg-brand-950 hover:bg-blue-900/40 text-slate-300 border border-brand-700">O (270°)</button>
+              </div>
+            </div>
+            <div class="mt-2">
+              <input type="range" id="screen-orientation-slider" min="0" max="360" value="270" oninput="onOrientationSliderChange(this.value)" class="w-full accent-blue-500 cursor-pointer" />
+            </div>
+          </div>
+
+          <!-- Tarjeta 4: Estado Óptimo Recomendado -->
+          <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+            <div>
+              <span class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 block mb-1">Brillo Óptimo Solar</span>
+              <div class="flex items-baseline gap-2">
+                <span id="solar-target-br" class="text-2xl font-black text-white">--%</span>
+                <span id="solar-condition-badge" class="text-[11px] font-semibold text-emerald-400">Calculando...</span>
+              </div>
+            </div>
+            <div class="mt-2 pt-2 border-t border-brand-700/50 flex items-center justify-between text-xs">
+              <span class="text-slate-400 text-[11px]">Incidencia Cara:</span>
+              <span id="solar-incidence-val" class="font-mono text-white text-[11px]">0.0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gráfica de Curva de Brillo Solar 24 Horas -->
+        <div class="bg-brand-900 border border-brand-700/60 rounded-xl p-5 shadow-sm space-y-3">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-brand-700/50 pb-3">
+            <div>
+              <h4 class="text-sm font-bold text-white flex items-center gap-2">
+                <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/></svg>
+                Curva de Regulación de Brillo 24 Horas (Proyección Solar Diaria)
+              </h4>
+              <p class="text-xs text-slate-400 mt-0.5" id="solar-chart-subtitle">
+                Ventana de sol frontal estimada según orientación geográfica.
+              </p>
+            </div>
+            <div class="flex items-center gap-4 text-xs">
+              <div class="flex items-center gap-1.5">
+                <span class="w-3 h-3 rounded-full bg-amber-500"></span>
+                <span class="text-slate-300">Brillo Recomendado (%)</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="w-3 h-3 rounded-full bg-blue-400"></span>
+                <span class="text-slate-300">Elevación Solar (°)</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="h-64 w-full relative">
+            <canvas id="chart-solar-schedule"></canvas>
+          </div>
+        </div>
+      </div>
+
     </section>
 
     <!-- ────────────────────────────────────────────────────────────────────────
@@ -927,6 +1053,9 @@
       } catch (e) {
         console.error("Error consultando Novastar:", e);
       }
+
+      // 3. Obtener telemetría solar y curva horaria de la pantalla
+      await loadSolarData();
     }
 
     async function toggleShellyPower(turnOn) {
@@ -995,6 +1124,234 @@
         }
       } catch (e) {
         alert("Error conmutando salida de video de Novastar.");
+      }
+    }
+
+    // ── CALENDARIO SOLAR Y REGULACIÓN AUTOMÁTICA DE BRILLO ──────────────────
+    let chartSolar = null;
+    let currentSolarSchedule = null;
+    let currentSolarConfig = { orientation: 270.0, autoEnabled: true, lat: 20.6736, lon: -103.3855 };
+
+    async function loadSolarData() {
+      const locId = selectedLocation === 'all' ? 'loc_minerva' : selectedLocation;
+      try {
+        // 1. Obtener estado solar actual y parámetros
+        const resStatus = await fetch(`/api/solar/status?location_id=${locId}`);
+        const dataStatus = await resStatus.json();
+        
+        if (dataStatus.status === 'ok') {
+          document.getElementById('solar-elev-val').textContent = `${dataStatus.solar.elevation_deg}°`;
+          document.getElementById('solar-az-val').textContent = `${dataStatus.solar.azimuth_deg}°`;
+          document.getElementById('solar-time-val').textContent = dataStatus.solar.true_solar_time_str;
+
+          document.getElementById('solar-sunrise').textContent = dataStatus.ephemeris.sunrise;
+          document.getElementById('solar-noon').textContent = dataStatus.ephemeris.solar_noon;
+          document.getElementById('solar-sunset').textContent = dataStatus.ephemeris.sunset;
+
+          const deg = dataStatus.orientation.degrees;
+          currentSolarConfig.orientation = deg;
+          currentSolarConfig.autoEnabled = dataStatus.auto_brightness_enabled;
+          currentSolarConfig.lat = dataStatus.coordinates.lat;
+          currentSolarConfig.lon = dataStatus.coordinates.lon;
+
+          document.getElementById('screen-orientation-badge').textContent = `${deg}°`;
+          document.getElementById('screen-orientation-label').textContent = dataStatus.orientation.cardinal;
+          document.getElementById('screen-orientation-slider').value = deg;
+          document.getElementById('solar-auto-toggle').checked = dataStatus.auto_brightness_enabled;
+
+          document.getElementById('solar-target-br').textContent = `${dataStatus.brightness.recommended_brightness}%`;
+          document.getElementById('solar-condition-badge').textContent = dataStatus.brightness.condition;
+          document.getElementById('solar-incidence-val').textContent = dataStatus.brightness.incidence_factor;
+        }
+
+        // 2. Obtener curva completa de 24h
+        const resSched = await fetch(`/api/solar/schedule?location_id=${locId}`);
+        const dataSched = await resSched.json();
+        if (dataSched.status === 'ok') {
+          currentSolarSchedule = dataSched.schedule;
+          renderSolarScheduleChart(dataSched.schedule);
+        }
+      } catch (e) {
+        console.error("Error cargando telemetría solar:", e);
+      }
+    }
+
+    function renderSolarScheduleChart(schedule) {
+      const ctx = document.getElementById('chart-solar-schedule').getContext('2d');
+      const labels = schedule.points.map(p => p.time);
+      const brightnessData = schedule.points.map(p => p.brightness);
+      const elevationData = schedule.points.map(p => p.elevation_deg);
+
+      document.getElementById('solar-chart-subtitle').textContent = 
+        `Pantalla orientada al ${schedule.screen_orientation_cardinal} (${schedule.screen_orientation_deg}°). Ventana de incidencia solar frontal: ${schedule.peak_window} (Pico: ${schedule.peak_brightness}%).`;
+
+      if (chartSolar) chartSolar.destroy();
+
+      chartSolar = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'Brillo Recomendado (%)',
+              data: brightnessData,
+              borderColor: '#f59e0b',
+              backgroundColor: 'rgba(245, 158, 11, 0.15)',
+              fill: true,
+              tension: 0.35,
+              pointRadius: 0,
+              pointHoverRadius: 5,
+              yAxisID: 'y'
+            },
+            {
+              label: 'Elevación Solar (°)',
+              data: elevationData,
+              borderColor: '#38bdf8',
+              backgroundColor: 'transparent',
+              borderDash: [4, 4],
+              tension: 0.35,
+              pointRadius: 0,
+              pointHoverRadius: 4,
+              yAxisID: 'y1'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: {
+            mode: 'index',
+            intersect: false,
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#1e293b',
+              titleColor: '#ffffff',
+              bodyColor: '#cbd5e1',
+              borderColor: '#475569',
+              borderWidth: 1,
+              callbacks: {
+                label: function(context) {
+                  let label = context.dataset.label || '';
+                  if (label) label += ': ';
+                  if (context.parsed.y !== null) {
+                    label += context.parsed.y + (context.datasetIndex === 0 ? '%' : '°');
+                  }
+                  return label;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(51, 65, 85, 0.3)' },
+              ticks: { color: '#94a3b8', font: { size: 10 }, maxTicksLimit: 12 }
+            },
+            y: {
+              type: 'linear',
+              display: true,
+              position: 'left',
+              min: 0,
+              max: 100,
+              grid: { color: 'rgba(51, 65, 85, 0.3)' },
+              ticks: { color: '#f59e0b', font: { size: 10 } },
+              title: { display: true, text: 'Brillo (%)', color: '#f59e0b', font: { size: 10 } }
+            },
+            y1: {
+              type: 'linear',
+              display: true,
+              position: 'right',
+              min: -30,
+              max: 90,
+              grid: { drawOnChartArea: false },
+              ticks: { color: '#38bdf8', font: { size: 10 } },
+              title: { display: true, text: 'Altura Solar (°)', color: '#38bdf8', font: { size: 10 } }
+            }
+          }
+        }
+      });
+    }
+
+    let orientationDebounceTimer = null;
+    function onOrientationSliderChange(val) {
+      const deg = parseFloat(val);
+      document.getElementById('screen-orientation-badge').textContent = `${deg}°`;
+      updateOrientationLabelText(deg);
+
+      clearTimeout(orientationDebounceTimer);
+      orientationDebounceTimer = setTimeout(() => {
+        saveSolarConfig(deg, currentSolarConfig.autoEnabled);
+      }, 300);
+    }
+
+    function setOrientationPreset(deg) {
+      document.getElementById('screen-orientation-slider').value = deg;
+      document.getElementById('screen-orientation-badge').textContent = `${deg}°`;
+      updateOrientationLabelText(deg);
+      saveSolarConfig(deg, currentSolarConfig.autoEnabled);
+    }
+
+    function updateOrientationLabelText(deg) {
+      let label = "Norte (0°)";
+      if (deg >= 22.5 && deg < 67.5) label = "Noreste (45°)";
+      else if (deg >= 67.5 && deg < 112.5) label = "Este / Oriente (90°)";
+      else if (deg >= 112.5 && deg < 157.5) label = "Sureste (135°)";
+      else if (deg >= 157.5 && deg < 202.5) label = "Sur (180°)";
+      else if (deg >= 202.5 && deg < 247.5) label = "Suroeste (225°)";
+      else if (deg >= 247.5 && deg < 292.5) label = "Oeste / Poniente (270°)";
+      else if (deg >= 292.5 && deg < 337.5) label = "Noroeste (315°)";
+      document.getElementById('screen-orientation-label').textContent = label;
+    }
+
+    async function toggleSolarAutoMode(enabled) {
+      currentSolarConfig.autoEnabled = enabled;
+      const deg = parseFloat(document.getElementById('screen-orientation-slider').value);
+      await saveSolarConfig(deg, enabled);
+    }
+
+    async function saveSolarConfig(deg, autoEnabled) {
+      const locId = selectedLocation === 'all' ? 'loc_minerva' : selectedLocation;
+      try {
+        const res = await fetch('/api/solar/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location_id: locId,
+            screen_orientation_deg: deg,
+            auto_brightness_enabled: autoEnabled
+          })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          await loadSolarData();
+          if (data.applied_brightness !== null) {
+            document.getElementById('novastar-brightness-val').textContent = `${data.applied_brightness}%`;
+            document.getElementById('novastar-brightness-slider').value = data.applied_brightness;
+          }
+        }
+      } catch (e) {
+        console.error("Error guardando configuración solar:", e);
+      }
+    }
+
+    async function applySolarNow() {
+      const locId = selectedLocation === 'all' ? 'loc_minerva' : selectedLocation;
+      try {
+        const res = await fetch('/api/solar/apply-now', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ location_id: locId })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          alert(`Brillo solar de ${data.target_brightness}% aplicado exitosamente al NovaStar TB40 (${data.condition}).`);
+          document.getElementById('novastar-brightness-val').textContent = `${data.target_brightness}%`;
+          document.getElementById('novastar-brightness-slider').value = data.target_brightness;
+          await loadSolarData();
+        }
+      } catch (e) {
+        alert("Error aplicando regulación solar de brillo.");
       }
     }
 

@@ -34,6 +34,15 @@ Plataforma corporativa de **auditoría de tráfico vehicular (aforo multicámara
 - Estimación precisa de energía consumida (**kWh**) por campaña y desglose de costo financiero en **$ MXN** con la tarifa contratada (ej. CFE Gran Demanda / Media Tensión).
 - Indicador **CPM Energético** (Costo de energía eléctrica por cada 1,000 impactos vehiculares).
 
+### 6. ☀️ Calendario y Regulación de Brillo Solar por Orientación Geográfica
+- **Cálculo Astronómico Autónomo**: Determina en tiempo real la elevación y azimut solar a partir de las coordenadas (latitud y longitud) sin depender de APIs de terceros.
+- **Incidencia Frontal según Azimut de la Pantalla**:
+  - Pantallas orientadas al **Este / Oriente (90°)**: Elevan su brillo a su punto máximo durante las horas de la mañana (08:00 - 10:30 hrs).
+  - Pantallas orientadas al **Oeste / Poniente (270°)**: Alcanzan su pico de brillo durante la tarde (15:30 - 18:30 hrs) ante el sol rasante.
+  - Sombra e iluminación difusa: Disminución inteligente del brillo a niveles moderados (**60% - 70%**) para ahorrar energía cuando el sol está detrás de la pantalla.
+  - Noche y crepúsculo: Reducción automática a niveles de seguridad vial (**20% - 25%**) para evitar deslumbramiento a conductores y abatir el costo del recibo eléctrico.
+- **Curva Horaria 24h Interactiva**: Gráfica en tiempo real con 48 puntos de proyección diaria y selector visual de ángulo de orientación.
+
 ---
 
 ## 🏗️ Arquitectura del Sistema
@@ -96,6 +105,10 @@ El panel estará disponible de inmediato en: **`http://localhost:8000`**.
 | `/api/novastar/status` | `GET` | Estado de conexión, standby y brillo del NovaStar TB40. |
 | `/api/novastar/power` | `POST` | Encendido/apagado de la pantalla NovaStar TB40. |
 | `/api/novastar/brightness` | `POST` | Regulación del nivel de brillo (0 - 100%) del TB40. |
+| `/api/solar/status` | `GET` | Posición solar actual y nivel de brillo recomendado por orientación. |
+| `/api/solar/schedule` | `GET` | Calendario y proyección horaria solar de brillo para 24 horas. |
+| `/api/solar/config` | `POST` | Actualización de orientación (° azimut) y modo solar automático. |
+| `/api/solar/apply-now` | `POST` | Ajuste forzado inmediato de brillo solar al NovaStar TB40. |
 | `/api/campaigns` | `GET` / `POST` | Consulta y registro de campañas publicitarias activas. |
 | `/api/campaigns/summary` | `GET` | Métricas de aforo expuesto, kWh consumidos y costo eléctrico por campaña. |
 | `/api/edge/sync-report` | `POST` | Recepción de reportes de aforo ligero desde nodos Edge sin enviar video. |
