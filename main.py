@@ -342,19 +342,58 @@ async def video_feed(cam_id: str) -> StreamingResponse:
     )
 
 
+def _create_disabled_frame(cam_id: str) -> bytes:
+    """
+    Crea un frame JPEG corporativo indicando que la cámara está desactivada/pausada.
+    """
+    frame = np.zeros((config.FRAME_HEIGHT, config.FRAME_WIDTH, 3), dtype=np.uint8)
+    frame[:] = (22, 28, 38)   # Fondo slate oscuro
+    
+    cv2.putText(
+        frame, f"CAMARA DESACTIVADA - {cam_id.upper()}",
+        (config.FRAME_WIDTH // 2 - 270, config.FRAME_HEIGHT // 2 - 20),
+        cv2.FONT_HERSHEY_SIMPLEX, 1.1, (220, 220, 230), 2, cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame, "Captura e inferencia en pausa (Ahorro de NPU/CPU)",
+        (config.FRAME_WIDTH // 2 - 250, config.FRAME_HEIGHT // 2 + 30),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.75, (130, 150, 170), 2, cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame, "Activala desde el panel superior o dispositivos",
+        (config.FRAME_WIDTH // 2 - 230, config.FRAME_HEIGHT // 2 + 75),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (80, 160, 240), 1, cv2.LINE_AA,
+    )
+    
+    _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+    return buffer.tobytes()
+
+
 async def _mjpeg_generator(cam_id: str):
     """
     Generador asíncrono que emite frames JPEG en formato MJPEG.
     Soporta desconexión limpia cuando el cliente cierra la conexión.
     """
-    # Frame de "sin señal" para cuando no hay frame disponible
     no_signal_frame = _create_no_signal_frame(cam_id)
+    disabled_frame = _create_disabled_frame(cam_id)
 
     while True:
+        stream = streams.get(cam_id)
+        is_active = (cam_id in active_processing) and (stream is None or getattr(stream, "enabled", True))
+        
+        if not is_active:
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n"
+                + disabled_frame
+                + b"\r\n"
+            )
+            await asyncio.sleep(0.5)
+            continue
+
         frame_bytes = latest_frames.get(cam_id)
 
         if frame_bytes is None:
-            # Todavía no hay frames del analizador; enviar frame de espera
             frame_bytes = no_signal_frame
 
         yield (
@@ -566,15 +605,24 @@ async def update_line(cam_id: str, line_data: LineUpdate) -> JSONResponse:
 class CamToggle(BaseModel):
     enabled: bool
 
-@app.post("/api/camera/{cam_id}/toggle", summary="Habilitar o deshabilitar inferencia de la cámara")
+@app.post("/api/camera/{cam_id}/toggle", summary="Habilitar o deshabilitar captura e inferencia de la cámara")
 async def toggle_cam(cam_id: str, data: CamToggle) -> JSONResponse:
-    if cam_id not in analyzers:
+    if cam_id not in streams and cam_id not in analyzers:
         raise HTTPException(status_code=404, detail=f"Cámara '{cam_id}' no encontrada.")
+    
+    stream = streams.get(cam_id)
     if data.enabled:
         active_processing.add(cam_id)
+        if stream:
+            stream.set_enabled(True)
     else:
         active_processing.discard(cam_id)
-    logger.info(f"[API] Cámara '{cam_id}' inferencia activa: {data.enabled}")
+        if stream:
+            stream.set_enabled(False)
+        if cam_id in latest_frames:
+            latest_frames[cam_id] = _create_disabled_frame(cam_id)
+
+    logger.info(f"[API] Cámara '{cam_id}' estado activada/desactivada: {data.enabled}")
     return JSONResponse({"status": "ok", "cam_id": cam_id, "enabled": data.enabled})
 
 
@@ -582,13 +630,20 @@ async def toggle_cam(cam_id: str, data: CamToggle) -> JSONResponse:
 async def api_devices() -> JSONResponse:
     """
     Escanea puertos USB y devuelve las cámaras disponibles,
-    junto con los streams actualmente configurados y activos.
+    junto con los streams actualmente configurados y su estado de activación.
     """
     usb_cameras = camera_manager.scan_usb_cameras()
-    active = list(streams.keys())
+    cam_states = {}
+    for cid, st in streams.items():
+        cam_states[cid] = {
+            "source": str(st.source),
+            "enabled": getattr(st, "enabled", True) and (cid in active_processing),
+            "connected": st.connected
+        }
     return JSONResponse({
         "usb_cameras": usb_cameras,
-        "active_streams": active,
+        "active_streams": list(streams.keys()),
+        "configured_cameras": cam_states,
         "sources": config.CAMERA_SOURCES
     })
 
@@ -620,24 +675,24 @@ async def api_camera_add(req: CameraAddRequest) -> JSONResponse:
     # Línea por defecto si no existe
     if req.cam_id not in config.COUNTING_LINES:
         config.COUNTING_LINES[req.cam_id] = ((100, 360), (1180, 360))
-        # Actualizar config de líneas para persistir? 
-        # (Aquí podríamos llamar a la función que guarda en lines.json si existiera)
     
     return JSONResponse({"status": "ok", "cam_id": req.cam_id, "message": "Cámara agregada exitosamente."})
 
 
 
-@app.get("/api/cameras", summary="Lista de cámaras y estado de conexión")
+@app.get("/api/cameras", summary="Lista de cámaras y estado de conexión y activación")
 async def api_cameras() -> JSONResponse:
     """
-    Devuelve el estado de conexión de todas las cámaras configuradas.
+    Devuelve el estado de conexión y activación de todas las cámaras configuradas.
     """
     cam_status = {}
     for cam_id, stream in streams.items():
+        is_enabled = getattr(stream, "enabled", True) and (cam_id in active_processing)
         cam_status[cam_id] = {
             "source": str(stream.source),
-            "connected": stream.connected,
-            "fps": round(stream.fps, 1),
+            "connected": stream.connected if is_enabled else False,
+            "enabled": is_enabled,
+            "fps": round(stream.fps, 1) if is_enabled else 0.0,
             "reconnect_count": stream.reconnect_count,
         }
     return JSONResponse({"status": "ok", "cameras": cam_status})

@@ -61,6 +61,7 @@ class CameraStream:
         # Métricas de operación
         self.fps: float = config.ASSUMED_FPS        # Se actualiza con el FPS real del stream
         self.connected: bool = False
+        self.enabled: bool = True                   # Control de activación/desactivación
         self.reconnect_count: int = 0               # Contador de reconexiones acumuladas
         self.last_frame_time: float = 0.0           # Timestamp del último frame recibido
 
@@ -70,11 +71,35 @@ class CameraStream:
     # MÉTODOS PÚBLICOS
     # ──────────────────────────────────────────────────────────────────────────
 
+    def set_enabled(self, enabled: bool) -> bool:
+        """
+        Activa o desactiva la captura de la cámara.
+        Si se desactiva, detiene el hilo de lectura y libera los recursos de hardware (OpenCV).
+        Si se activa, vuelve a iniciar el hilo de captura en segundo plano.
+        """
+        if self.enabled == enabled:
+            return self.enabled
+
+        self.enabled = enabled
+        if enabled:
+            logger.info(f"[{self.cam_id}] Reactivando captura de cámara...")
+            self.start()
+        else:
+            logger.info(f"[{self.cam_id}] Desactivando captura de cámara (pausa de hardware)...")
+            self.stop()
+            self.connected = False
+            with self._frame_lock:
+                self._frame = None
+        return self.enabled
+
     def start(self) -> "CameraStream":
         """
         Inicia el hilo de captura en segundo plano.
         Retorna self para permitir encadenamiento: stream = CameraStream(...).start()
         """
+        if not self.enabled:
+            logger.info(f"[{self.cam_id}] No se inicia porque la cámara está desactivada.")
+            return self
         if self._running:
             logger.warning(f"[{self.cam_id}] El hilo de captura ya está en ejecución.")
             return self
@@ -116,8 +141,8 @@ class CameraStream:
             return self._frame.copy() if self._frame is not None else None
 
     def is_running(self) -> bool:
-        """Indica si el hilo de captura está activo."""
-        return self._running and (self._thread is not None) and self._thread.is_alive()
+        """Indica si el hilo de captura está activo y habilitado."""
+        return self.enabled and self._running and (self._thread is not None) and self._thread.is_alive()
 
     # ──────────────────────────────────────────────────────────────────────────
     # LÓGICA INTERNA DEL HILO
