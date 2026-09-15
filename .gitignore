@@ -4,3 +4,6 @@ __pycache__/
 *.onnx
 yolov8n_openvino_model/
 .env
+*.exe
+*.jpg
+*.db

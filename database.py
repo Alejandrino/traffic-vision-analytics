@@ -9,8 +9,11 @@ import sqlite3
 import datetime
 import random
 import os
+import uuid
 from typing import Optional, Any
 from pathlib import Path
+
+import auth_service
 
 DB_PATH = Path(__file__).parent / "traffic_history.db"
 
@@ -42,6 +45,40 @@ def init_db() -> None:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_cam_time ON traffic_events(camera_id, timestamp)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON traffic_events(vehicle_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_direction ON traffic_events(direction)")
+
+        # Migración dinámica de columna entity_type en traffic_events si no existe
+        cursor.execute("PRAGMA table_info(traffic_events)")
+        event_cols = [r["name"] for r in cursor.fetchall()]
+        if "entity_type" not in event_cols:
+            cursor.execute("ALTER TABLE traffic_events ADD COLUMN entity_type TEXT DEFAULT 'VEHICLE'")
+            cursor.execute("UPDATE traffic_events SET entity_type = 'PEDESTRIAN' WHERE vehicle_type = 'Peaton' OR vehicle_type = 'Persona'")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_entity ON traffic_events(entity_type)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_entity_time ON traffic_events(entity_type, timestamp)")
+
+        # Migración dinámica de columna line_id en traffic_events si no existe
+        if "line_id" not in event_cols:
+            cursor.execute("ALTER TABLE traffic_events ADD COLUMN line_id TEXT DEFAULT 'line_1'")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_line ON traffic_events(line_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_line_time ON traffic_events(line_id, timestamp)")
+
+        # ── TABLA DE AVISTAMIENTOS EN CÁMARA (MÉTRICA 1: VISTOS EN FOV) ─────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS camera_sightings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME NOT NULL,
+                camera_id TEXT NOT NULL,
+                track_id INTEGER NOT NULL,
+                vehicle_type TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                confidence REAL DEFAULT 0.0,
+                crossed INTEGER DEFAULT 0,
+                line_id TEXT DEFAULT NULL
+            )
+        """)
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sightings_unique ON camera_sightings(camera_id, track_id, date(timestamp))")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sightings_date ON camera_sightings(date(timestamp))")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sightings_cam_date ON camera_sightings(camera_id, date(timestamp))")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sightings_entity_date ON camera_sightings(entity_type, date(timestamp))")
 
         # ── TABLA DE UBICACIONES / SITIOS MULTI-PANTALLA ─────────────────────
         cursor.execute("""
@@ -180,6 +217,59 @@ def init_db() -> None:
                 FOREIGN KEY (location_id) REFERENCES locations(id) ON DELETE CASCADE
             )
         """)
+
+        # ── TABLA DE LOGS Y CONEXIONES/DESCONEXIONES DE CÁMARAS ───────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS camera_connection_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME NOT NULL,
+                camera_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source TEXT,
+                details TEXT,
+                duration_offline_sec REAL DEFAULT 0.0,
+                duration_online_sec REAL DEFAULT 0.0
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cam_conn_time ON camera_connection_logs(timestamp)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cam_conn_cam_time ON camera_connection_logs(camera_id, timestamp)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cam_conn_event ON camera_connection_logs(event_type)")
+
+        # ── TABLA DE USUARIOS Y ACCESOS UNIFICADOS ────────────────────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                nombre TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                rol TEXT NOT NULL DEFAULT 'cliente',
+                cliente_id TEXT,
+                activo INTEGER DEFAULT 1,
+                creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (cliente_id) REFERENCES clients(id) ON DELETE SET NULL
+            )
+        """)
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+
+        # ── TABLA DE INVITACIONES POR CORREO ─────────────────────────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS invitations (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                nombre TEXT NOT NULL,
+                rol TEXT NOT NULL DEFAULT 'cliente',
+                cliente_id TEXT,
+                token TEXT UNIQUE NOT NULL,
+                estado TEXT NOT NULL DEFAULT 'pendiente',
+                expira_en DATETIME NOT NULL,
+                creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (cliente_id) REFERENCES clients(id) ON DELETE SET NULL
+            )
+        """)
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_invitations_token ON invitations(token)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_invitations_email ON invitations(email)")
+
         conn.commit()
 
     # Si la base de datos está vacía, generar datos de muestra para pruebas y demostración ejecutiva
@@ -192,90 +282,349 @@ def record_event(
     direction: str,
     confidence: float = 0.0,
     dwell_time: float = 0.0,
-    event_time: Optional[datetime.datetime] = None
+    event_time: Optional[datetime.datetime] = None,
+    entity_type: Optional[str] = None,
+    line_id: str = "line_1"
 ) -> int:
-    """Registra un evento de cruce de línea en la base de datos."""
+    """Registra un evento de cruce de línea en la base de datos (vehículo o peatón y línea de conteo)."""
     if event_time is None:
         event_time = datetime.datetime.now()
     
+    if entity_type is None:
+        entity_type = "PEDESTRIAN" if vehicle_type in ("Peaton", "Persona") else "VEHICLE"
+
     time_str = event_time.strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO traffic_events (timestamp, camera_id, track_id, vehicle_type, direction, confidence, dwell_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (time_str, camera_id, track_id, vehicle_type, round(confidence, 2), round(dwell_time, 1), round(dwell_time, 1)))
+            INSERT INTO traffic_events (timestamp, camera_id, track_id, vehicle_type, direction, confidence, dwell_time, entity_type, line_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (time_str, camera_id, track_id, vehicle_type, direction, round(confidence, 2), round(dwell_time, 1), entity_type, line_id))
         conn.commit()
         return cursor.lastrowid or 0
 
-def get_kpis(camera_id: Optional[str] = None, date_str: Optional[str] = None) -> dict[str, Any]:
-    """Obtiene indicadores clave de rendimiento (KPIs) para una fecha o globales."""
+def record_sighting(
+    camera_id: str,
+    track_id: int,
+    vehicle_type: str,
+    entity_type: str = "VEHICLE",
+    confidence: float = 0.0,
+    timestamp: Optional[datetime.datetime] = None
+) -> None:
+    """Registra la detección de un vehículo o persona en el campo visual de la cámara (Métrica 1)."""
+    if timestamp is None:
+        timestamp = datetime.datetime.now()
+    time_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR IGNORE INTO camera_sightings (timestamp, camera_id, track_id, vehicle_type, entity_type, confidence, crossed)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+        """, (time_str, camera_id, track_id, vehicle_type, entity_type, round(confidence, 2)))
+        conn.commit()
+
+def mark_sighting_crossed(
+    camera_id: str,
+    track_id: int,
+    line_id: str = "line_1",
+    timestamp: Optional[datetime.datetime] = None
+) -> None:
+    """Marca que un vehículo o persona visto en la cámara cruzó por una línea delimitadora (Métrica 2)."""
+    if timestamp is None:
+        timestamp = datetime.datetime.now()
+    date_str = timestamp.strftime("%Y-%m-%d")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE camera_sightings
+            SET crossed = 1, line_id = ?
+            WHERE camera_id = ? AND track_id = ? AND date(timestamp) = ?
+        """, (line_id, camera_id, track_id, date_str))
+        conn.commit()
+
+def get_today_counts(camera_id: str) -> dict[str, Any]:
+    """Obtiene los conteos acumulados de hoy para inicializar TrafficAnalyzer tras un reinicio."""
+    today_str = datetime.date.today().strftime("%Y-%m-%d")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT entity_type, COUNT(DISTINCT track_id) as count
+            FROM camera_sightings
+            WHERE camera_id = ? AND date(timestamp) = ?
+            GROUP BY entity_type
+        """, (camera_id, today_str))
+        seen_map = {r["entity_type"]: r["count"] for r in cursor.fetchall()}
+        
+        cursor.execute("""
+            SELECT entity_type, direction, COUNT(*) as count
+            FROM traffic_events
+            WHERE camera_id = ? AND date(timestamp) = ?
+            GROUP BY entity_type, direction
+        """, (camera_id, today_str))
+        events_rows = cursor.fetchall()
+        
+        veh_in = sum(r["count"] for r in events_rows if r["entity_type"] == "VEHICLE" and r["direction"] == "IN")
+        veh_out = sum(r["count"] for r in events_rows if r["entity_type"] == "VEHICLE" and r["direction"] == "OUT")
+        ped_in = sum(r["count"] for r in events_rows if r["entity_type"] == "PEDESTRIAN" and r["direction"] == "IN")
+        ped_out = sum(r["count"] for r in events_rows if r["entity_type"] == "PEDESTRIAN" and r["direction"] == "OUT")
+
+        cursor.execute("""
+            SELECT entity_type, COUNT(DISTINCT track_id) as count
+            FROM traffic_events
+            WHERE camera_id = ? AND date(timestamp) = ?
+            GROUP BY entity_type
+        """, (camera_id, today_str))
+        crossed_map = {r["entity_type"]: r["count"] for r in cursor.fetchall()}
+
+        return {
+            "vehicles_seen": max(seen_map.get("VEHICLE", 0), crossed_map.get("VEHICLE", 0)),
+            "pedestrians_seen": max(seen_map.get("PEDESTRIAN", 0), crossed_map.get("PEDESTRIAN", 0)),
+            "vehicles_crossed": crossed_map.get("VEHICLE", 0),
+            "pedestrians_crossed": crossed_map.get("PEDESTRIAN", 0),
+            "vehicles_in": veh_in,
+            "vehicles_out": veh_out,
+            "pedestrians_in": ped_in,
+            "pedestrians_out": ped_out,
+        }
+
+def get_today_line_counts(camera_id: str) -> dict[str, dict[str, int]]:
+    """Devuelve los conteos acumulados de hoy desglosados por línea para una cámara."""
+    today_str = datetime.date.today().strftime("%Y-%m-%d")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT line_id, entity_type, direction, COUNT(*) as count
+            FROM traffic_events
+            WHERE camera_id = ? AND date(timestamp) = ?
+            GROUP BY line_id, entity_type, direction
+        """, (camera_id, today_str))
+        res = {}
+        for r in cursor.fetchall():
+            lid = r["line_id"]
+            if not lid:
+                continue
+            if lid not in res:
+                res[lid] = {"vehicles_in": 0, "vehicles_out": 0, "pedestrians_in": 0, "pedestrians_out": 0}
+            ent = r["entity_type"]
+            dirn = r["direction"]
+            cnt = r["count"]
+            if ent == "PEDESTRIAN":
+                if dirn == "IN":
+                    res[lid]["pedestrians_in"] += cnt
+                else:
+                    res[lid]["pedestrians_out"] += cnt
+            else:
+                if dirn == "IN":
+                    res[lid]["vehicles_in"] += cnt
+                else:
+                    res[lid]["vehicles_out"] += cnt
+        return res
+
+def get_kpis(camera_id: Optional[str] = None, date_str: Optional[str] = None, entity_type: Optional[str] = None, line_id: Optional[str] = None) -> dict[str, Any]:
+    """Obtiene indicadores clave de rendimiento (KPIs) globales y desglosados con Doble Métrica: Vistos en Cámara vs Cruces por Línea."""
     if date_str is None:
         date_str = datetime.date.today().strftime("%Y-%m-%d")
         
-    where_clauses = ["date(timestamp) = ?"]
-    params: list[Any] = [date_str]
+    base_where_clauses = ["date(timestamp) = ?"]
+    base_params: list[Any] = [date_str]
     
     if camera_id and camera_id != "all":
-        where_clauses.append("camera_id = ?")
-        params.append(camera_id)
+        base_where_clauses.append("camera_id = ?")
+        base_params.append(camera_id)
+
+    if line_id and line_id != "all":
+        base_where_clauses.append("line_id = ?")
+        base_params.append(line_id)
         
-    where_sql = " AND ".join(where_clauses)
+    base_where_sql = " AND ".join(base_where_clauses)
     
+    # Cláusula para filtro específico si se solicita un panel concreto
+    active_where_clauses = list(base_where_clauses)
+    active_params = list(base_params)
+    if entity_type and entity_type.upper() != "ALL":
+        active_where_clauses.append("UPPER(entity_type) = ?")
+        active_params.append(entity_type.upper())
+    active_where_sql = " AND ".join(active_where_clauses)
+
+    # Cláusula para tabla de avistamientos (Métrica 1: Vistos en campo de visión)
+    s_clauses = ["date(timestamp) = ?"]
+    s_params: list[Any] = [date_str]
+    if camera_id and camera_id != "all":
+        s_clauses.append("camera_id = ?")
+        s_params.append(camera_id)
+    s_sql = " AND ".join(s_clauses)
+
     with get_connection() as conn:
         cursor = conn.cursor()
+
+        # Avistamientos registrados en cámara (Métrica 1)
+        cursor.execute(f"""
+            SELECT 
+                COUNT(*) as total_sightings,
+                SUM(CASE WHEN UPPER(entity_type) = 'VEHICLE' THEN 1 ELSE 0 END) as veh_sightings,
+                SUM(CASE WHEN UPPER(entity_type) = 'PEDESTRIAN' THEN 1 ELSE 0 END) as ped_sightings
+            FROM camera_sightings
+            WHERE {s_sql}
+        """, s_params)
+        s_row = cursor.fetchone()
+        db_veh_seen = (s_row["veh_sightings"] if s_row else 0) or 0
+        db_ped_seen = (s_row["ped_sightings"] if s_row else 0) or 0
+        db_total_seen = (s_row["total_sightings"] if s_row else 0) or 0
         
-        # Totales In / Out
+        # Totales In / Out de cruces por líneas según filtro activo (Métrica 2)
         cursor.execute(f"""
             SELECT 
                 COUNT(*) as total_flow,
+                COUNT(DISTINCT track_id) as total_crossed_tracks,
                 SUM(CASE WHEN direction = 'IN' THEN 1 ELSE 0 END) as total_in,
                 SUM(CASE WHEN direction = 'OUT' THEN 1 ELSE 0 END) as total_out,
                 AVG(dwell_time) as avg_dwell
             FROM traffic_events
-            WHERE {where_sql}
-        """, params)
+            WHERE {active_where_sql}
+        """, active_params)
         row = cursor.fetchone()
         
         total_flow = row["total_flow"] or 0
+        total_crossed_tracks = row["total_crossed_tracks"] or 0
         total_in = row["total_in"] or 0
         total_out = row["total_out"] or 0
         avg_dwell = round(row["avg_dwell"] or 0.0, 1)
         
-        # Hora pico (hora con mayor aforo)
+        # Hora pico según filtro activo
         cursor.execute(f"""
             SELECT strftime('%H:00', timestamp) as hour_slot, COUNT(*) as count
             FROM traffic_events
-            WHERE {where_sql}
+            WHERE {active_where_sql}
             GROUP BY hour_slot
             ORDER BY count DESC
             LIMIT 1
-        """, params)
+        """, active_params)
         peak_row = cursor.fetchone()
-        peak_hour = f"{peak_row['hour_slot']} ({peak_row['count']} veh.)" if peak_row else "N/A"
+        peak_label = "peatones" if entity_type and entity_type.upper() == "PEDESTRIAN" else "veh."
+        peak_hour = f"{peak_row['hour_slot']} ({peak_row['count']} {peak_label})" if peak_row else "N/A"
         
-        # Desglose por vehículo
+        # Desglose por tipo de objeto
         cursor.execute(f"""
             SELECT vehicle_type, COUNT(*) as count
             FROM traffic_events
-            WHERE {where_sql}
+            WHERE {active_where_sql}
             GROUP BY vehicle_type
             ORDER BY count DESC
-        """, params)
+        """, active_params)
         classes = {r["vehicle_type"]: r["count"] for r in cursor.fetchall()}
+
+        # ── SUBPANEL ESPECÍFICO: VEHÍCULOS ──────────────────────────────────
+        cursor.execute(f"""
+            SELECT 
+                COUNT(*) as total_flow,
+                COUNT(DISTINCT track_id) as total_crossed_tracks,
+                SUM(CASE WHEN direction = 'IN' THEN 1 ELSE 0 END) as total_in,
+                SUM(CASE WHEN direction = 'OUT' THEN 1 ELSE 0 END) as total_out,
+                AVG(dwell_time) as avg_dwell
+            FROM traffic_events
+            WHERE {base_where_sql} AND UPPER(entity_type) = 'VEHICLE'
+        """, base_params)
+        v_row = cursor.fetchone()
+        v_total_flow = v_row["total_flow"] or 0
+        v_total_crossed = v_row["total_crossed_tracks"] or 0
+        v_total_in = v_row["total_in"] or 0
+        v_total_out = v_row["total_out"] or 0
+        v_avg_dwell = round(v_row["avg_dwell"] or 0.0, 1)
+
+        v_seen = max(db_veh_seen, v_total_crossed)
+        v_crossing_rate = round((v_total_crossed / max(v_seen, 1)) * 100.0, 1) if v_seen > 0 else 0.0
+
+        cursor.execute(f"""
+            SELECT strftime('%H:00', timestamp) as hour_slot, COUNT(*) as count
+            FROM traffic_events
+            WHERE {base_where_sql} AND UPPER(entity_type) = 'VEHICLE'
+            GROUP BY hour_slot
+            ORDER BY count DESC
+            LIMIT 1
+        """, base_params)
+        v_peak_row = cursor.fetchone()
+        v_peak_hour = f"{v_peak_row['hour_slot']} ({v_peak_row['count']} veh.)" if v_peak_row else "N/A"
+
+        cursor.execute(f"""
+            SELECT vehicle_type, COUNT(*) as count
+            FROM traffic_events
+            WHERE {base_where_sql} AND UPPER(entity_type) = 'VEHICLE'
+            GROUP BY vehicle_type
+            ORDER BY count DESC
+        """, base_params)
+        v_classes = {r["vehicle_type"]: r["count"] for r in cursor.fetchall()}
+
+        # ── SUBPANEL ESPECÍFICO: PEATONES ───────────────────────────────────
+        cursor.execute(f"""
+            SELECT 
+                COUNT(*) as total_flow,
+                COUNT(DISTINCT track_id) as total_crossed_tracks,
+                SUM(CASE WHEN direction = 'IN' THEN 1 ELSE 0 END) as total_in,
+                SUM(CASE WHEN direction = 'OUT' THEN 1 ELSE 0 END) as total_out,
+                AVG(dwell_time) as avg_dwell
+            FROM traffic_events
+            WHERE {base_where_sql} AND UPPER(entity_type) = 'PEDESTRIAN'
+        """, base_params)
+        p_row = cursor.fetchone()
+        p_total_flow = p_row["total_flow"] or 0
+        p_total_crossed = p_row["total_crossed_tracks"] or 0
+        p_total_in = p_row["total_in"] or 0
+        p_total_out = p_row["total_out"] or 0
+        p_avg_dwell = round(p_row["avg_dwell"] or 0.0, 1)
+
+        p_seen = max(db_ped_seen, p_total_crossed)
+        p_crossing_rate = round((p_total_crossed / max(p_seen, 1)) * 100.0, 1) if p_seen > 0 else 0.0
+
+        cursor.execute(f"""
+            SELECT strftime('%H:00', timestamp) as hour_slot, COUNT(*) as count
+            FROM traffic_events
+            WHERE {base_where_sql} AND UPPER(entity_type) = 'PEDESTRIAN'
+            GROUP BY hour_slot
+            ORDER BY count DESC
+            LIMIT 1
+        """, base_params)
+        p_peak_row = cursor.fetchone()
+        p_peak_hour = f"{p_peak_row['hour_slot']} ({p_peak_row['count']} peatones)" if p_peak_row else "N/A"
+
+        final_total_seen = max(db_total_seen, total_crossed_tracks, v_seen + p_seen)
+        tot_crossing_rate = round((total_crossed_tracks / max(final_total_seen, 1)) * 100.0, 1) if final_total_seen > 0 else 0.0
         
         return {
             "date": date_str,
+            "total_seen": final_total_seen,
+            "total_crossed": total_crossed_tracks,
             "total_flow": total_flow,
             "total_in": total_in,
             "total_out": total_out,
+            "crossing_rate": tot_crossing_rate,
             "avg_dwell_seconds": avg_dwell,
             "peak_hour": peak_hour,
             "vehicle_classes": classes,
+            "vehicles": {
+                "seen": v_seen,
+                "crossed": v_total_crossed,
+                "total_flow": v_total_flow,
+                "total_in": v_total_in,
+                "total_out": v_total_out,
+                "crossing_rate": v_crossing_rate,
+                "avg_dwell_seconds": v_avg_dwell,
+                "peak_hour": v_peak_hour,
+                "classes": v_classes
+            },
+            "pedestrians": {
+                "seen": p_seen,
+                "crossed": p_total_crossed,
+                "total_flow": p_total_flow,
+                "total_in": p_total_in,
+                "total_out": p_total_out,
+                "crossing_rate": p_crossing_rate,
+                "avg_dwell_seconds": p_avg_dwell,
+                "peak_hour": p_peak_hour
+            }
         }
 
-def get_hourly_metrics(camera_id: Optional[str] = None, date_str: Optional[str] = None) -> list[dict[str, Any]]:
-    """Obtiene el aforo desglosado hora por hora (00:00 a 23:00) para un día."""
+def get_hourly_metrics(camera_id: Optional[str] = None, date_str: Optional[str] = None, entity_type: Optional[str] = None) -> list[dict[str, Any]]:
+    """Obtiene el aforo desglosado hora por hora (00:00 a 23:00) para un día, con separación vehicular y peatonal."""
     if date_str is None:
         date_str = datetime.date.today().strftime("%Y-%m-%d")
         
@@ -285,6 +634,10 @@ def get_hourly_metrics(camera_id: Optional[str] = None, date_str: Optional[str] 
     if camera_id and camera_id != "all":
         where_clauses.append("camera_id = ?")
         params.append(camera_id)
+
+    if entity_type and entity_type.upper() != "ALL":
+        where_clauses.append("UPPER(entity_type) = ?")
+        params.append(entity_type.upper())
         
     where_sql = " AND ".join(where_clauses)
     
@@ -295,7 +648,13 @@ def get_hourly_metrics(camera_id: Optional[str] = None, date_str: Optional[str] 
                 cast(strftime('%H', timestamp) as integer) as hour,
                 COUNT(*) as total,
                 SUM(CASE WHEN direction = 'IN' THEN 1 ELSE 0 END) as total_in,
-                SUM(CASE WHEN direction = 'OUT' THEN 1 ELSE 0 END) as total_out
+                SUM(CASE WHEN direction = 'OUT' THEN 1 ELSE 0 END) as total_out,
+                SUM(CASE WHEN UPPER(entity_type) = 'VEHICLE' THEN 1 ELSE 0 END) as veh_total,
+                SUM(CASE WHEN UPPER(entity_type) = 'VEHICLE' AND direction = 'IN' THEN 1 ELSE 0 END) as veh_in,
+                SUM(CASE WHEN UPPER(entity_type) = 'VEHICLE' AND direction = 'OUT' THEN 1 ELSE 0 END) as veh_out,
+                SUM(CASE WHEN UPPER(entity_type) = 'PEDESTRIAN' THEN 1 ELSE 0 END) as ped_total,
+                SUM(CASE WHEN UPPER(entity_type) = 'PEDESTRIAN' AND direction = 'IN' THEN 1 ELSE 0 END) as ped_in,
+                SUM(CASE WHEN UPPER(entity_type) = 'PEDESTRIAN' AND direction = 'OUT' THEN 1 ELSE 0 END) as ped_out
             FROM traffic_events
             WHERE {where_sql}
             GROUP BY hour
@@ -309,29 +668,46 @@ def get_hourly_metrics(camera_id: Optional[str] = None, date_str: Optional[str] 
         for h in range(24):
             hour_label = f"{h:02d}:00"
             if h in rows:
+                r = rows[h]
                 hourly_data.append({
                     "hour": hour_label,
-                    "total": rows[h]["total"],
-                    "in": rows[h]["total_in"],
-                    "out": rows[h]["total_out"]
+                    "total": r["total"],
+                    "in": r["total_in"],
+                    "out": r["total_out"],
+                    "vehicles_total": r["veh_total"] or 0,
+                    "vehicles_in": r["veh_in"] or 0,
+                    "vehicles_out": r["veh_out"] or 0,
+                    "pedestrians_total": r["ped_total"] or 0,
+                    "pedestrians_in": r["ped_in"] or 0,
+                    "pedestrians_out": r["ped_out"] or 0,
                 })
             else:
                 hourly_data.append({
                     "hour": hour_label,
                     "total": 0,
                     "in": 0,
-                    "out": 0
+                    "out": 0,
+                    "vehicles_total": 0,
+                    "vehicles_in": 0,
+                    "vehicles_out": 0,
+                    "pedestrians_total": 0,
+                    "pedestrians_in": 0,
+                    "pedestrians_out": 0,
                 })
         return hourly_data
 
-def get_daily_metrics(camera_id: Optional[str] = None, days: int = 7) -> list[dict[str, Any]]:
-    """Obtiene el volumen total por día para los últimos N días."""
+def get_daily_metrics(camera_id: Optional[str] = None, days: int = 7, entity_type: Optional[str] = None) -> list[dict[str, Any]]:
+    """Obtiene el volumen total por día para los últimos N días con desglose vehicular y peatonal."""
     where_clauses = ["timestamp >= date('now', ?)"]
     params: list[Any] = [f"-{days} days"]
     
     if camera_id and camera_id != "all":
         where_clauses.append("camera_id = ?")
         params.append(camera_id)
+
+    if entity_type and entity_type.upper() != "ALL":
+        where_clauses.append("UPPER(entity_type) = ?")
+        params.append(entity_type.upper())
         
     where_sql = " AND ".join(where_clauses)
     
@@ -342,7 +718,9 @@ def get_daily_metrics(camera_id: Optional[str] = None, days: int = 7) -> list[di
                 date(timestamp) as day_date,
                 COUNT(*) as total,
                 SUM(CASE WHEN direction = 'IN' THEN 1 ELSE 0 END) as total_in,
-                SUM(CASE WHEN direction = 'OUT' THEN 1 ELSE 0 END) as total_out
+                SUM(CASE WHEN direction = 'OUT' THEN 1 ELSE 0 END) as total_out,
+                SUM(CASE WHEN UPPER(entity_type) = 'VEHICLE' THEN 1 ELSE 0 END) as veh_total,
+                SUM(CASE WHEN UPPER(entity_type) = 'PEDESTRIAN' THEN 1 ELSE 0 END) as ped_total
             FROM traffic_events
             WHERE {where_sql}
             GROUP BY day_date
@@ -354,7 +732,9 @@ def get_daily_metrics(camera_id: Optional[str] = None, days: int = 7) -> list[di
                 "date": r["day_date"],
                 "total": r["total"],
                 "in": r["total_in"],
-                "out": r["total_out"]
+                "out": r["total_out"],
+                "vehicles_total": r["veh_total"] or 0,
+                "pedestrians_total": r["ped_total"] or 0,
             }
             for r in cursor.fetchall()
         ]
@@ -365,16 +745,22 @@ def get_events(
     end_date: Optional[str] = None,
     vehicle_type: Optional[str] = None,
     direction: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    line_id: Optional[str] = None,
     limit: int = 50,
     offset: int = 0
 ) -> dict[str, Any]:
-    """Consulta la lista de eventos filtrada y paginada."""
+    """Consulta la lista de eventos filtrada y paginada, con soporte para entity_type y line_id."""
     where_clauses = []
     params: list[Any] = []
     
     if camera_id and camera_id != "all":
         where_clauses.append("camera_id = ?")
         params.append(camera_id)
+
+    if line_id and line_id != "all":
+        where_clauses.append("line_id = ?")
+        params.append(line_id)
         
     if start_date:
         where_clauses.append("timestamp >= ?")
@@ -391,6 +777,10 @@ def get_events(
     if direction and direction != "all":
         where_clauses.append("direction = ?")
         params.append(direction)
+
+    if entity_type and entity_type.upper() != "ALL":
+        where_clauses.append("UPPER(entity_type) = ?")
+        params.append(entity_type.upper())
         
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
     
@@ -403,7 +793,7 @@ def get_events(
         
         # Registros
         cursor.execute(f"""
-            SELECT id, timestamp, camera_id, track_id, vehicle_type, direction, confidence, dwell_time
+            SELECT id, timestamp, camera_id, track_id, vehicle_type, direction, confidence, dwell_time, entity_type, line_id
             FROM traffic_events
             {where_sql}
             ORDER BY timestamp DESC, id DESC
@@ -429,11 +819,12 @@ def seed_sample_data_if_empty() -> None:
             now = datetime.datetime.now()
             cameras = ["cam1", "cam2"]
             vehicle_types = [
-                ("Automovil", 0.65),
-                ("Camion", 0.15),
-                ("Autobus", 0.08),
-                ("Motocicleta", 0.10),
-                ("Bicicleta", 0.02)
+                ("Automovil", 0.45),
+                ("Peaton", 0.28),
+                ("Camion", 0.10),
+                ("Autobus", 0.05),
+                ("Motocicleta", 0.08),
+                ("Bicicleta", 0.04)
             ]
             
             # Generar datos para los últimos 7 días
@@ -469,7 +860,7 @@ def seed_sample_data_if_empty() -> None:
                         cam = random.choice(cameras)
                         track_id = random.randint(100, 9999)
                         
-                        # Selección ponderada de tipo de vehículo
+                        # Selección ponderada de tipo de vehículo o peatón
                         r = random.random()
                         cumulative = 0.0
                         v_type = "Automovil"
@@ -481,7 +872,8 @@ def seed_sample_data_if_empty() -> None:
                                 
                         direction = "IN" if random.random() > 0.48 else "OUT"
                         conf = round(random.uniform(0.70, 0.96), 2)
-                        dwell = round(random.uniform(2.5, 24.0), 1)
+                        dwell = round(random.uniform(3.5, 30.0) if v_type == "Peaton" else random.uniform(2.5, 18.0), 1)
+                        ent_type = "PEDESTRIAN" if v_type == "Peaton" else "VEHICLE"
                         
                         logger_events.append((
                             event_dt.strftime("%Y-%m-%d %H:%M:%S"),
@@ -490,14 +882,94 @@ def seed_sample_data_if_empty() -> None:
                             v_type,
                             direction,
                             conf,
-                            dwell
+                            dwell,
+                            ent_type
                         ))
                         
             cursor.executemany("""
-                INSERT INTO traffic_events (timestamp, camera_id, track_id, vehicle_type, direction, confidence, dwell_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO traffic_events (timestamp, camera_id, track_id, vehicle_type, direction, confidence, dwell_time, entity_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, logger_events)
             conn.commit()
+        else:
+            # Si ya existen eventos pero no hay peatones registrados, insertar una muestra para visualización del panel
+            cursor.execute("SELECT COUNT(*) as count FROM traffic_events WHERE UPPER(entity_type) = 'PEDESTRIAN'")
+            if cursor.fetchone()["count"] == 0:
+                now = datetime.datetime.now()
+                cameras = ["cam1", "cam2"]
+                ped_events = []
+                for day_offset in range(6, -1, -1):
+                    target_day = now.date() - datetime.timedelta(days=day_offset)
+                    for hour in range(8, 22):
+                        if day_offset == 0 and hour > now.hour:
+                            continue
+                        vol = random.randint(10, 28)
+                        for _ in range(vol):
+                            minute = random.randint(0, 59)
+                            second = random.randint(0, 59)
+                            event_dt = datetime.datetime(target_day.year, target_day.month, target_day.day, hour, minute, second)
+                            cam = random.choice(cameras)
+                            track_id = random.randint(5000, 9999)
+                            direction = "IN" if random.random() > 0.45 else "OUT"
+                            conf = round(random.uniform(0.75, 0.95), 2)
+                            dwell = round(random.uniform(5.0, 35.0), 1)
+                            ped_events.append((
+                                event_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                                cam,
+                                track_id,
+                                "Peaton",
+                                direction,
+                                conf,
+                                dwell,
+                                "PEDESTRIAN"
+                            ))
+                if ped_events:
+                    cursor.executemany("""
+                        INSERT INTO traffic_events (timestamp, camera_id, track_id, vehicle_type, direction, confidence, dwell_time, entity_type)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, ped_events)
+                    conn.commit()
+
+        # Sembrar o sincronizar avistamientos en camera_sightings (Métrica 1)
+        cursor.execute("SELECT COUNT(*) as count FROM camera_sightings")
+        if cursor.fetchone()["count"] == 0:
+            # Todos los eventos de cruce corresponden a objetos vistos que cruzaron
+            cursor.execute("""
+                INSERT OR IGNORE INTO camera_sightings (timestamp, camera_id, track_id, vehicle_type, entity_type, confidence, crossed, line_id)
+                SELECT timestamp, camera_id, track_id, vehicle_type, entity_type, confidence, 1, line_id
+                FROM traffic_events
+                GROUP BY camera_id, track_id, date(timestamp)
+            """)
+            conn.commit()
+
+            # Añadir avistamientos realistas de vehículos y personas que estuvieron en encuadre pero NO cruzaron la línea
+            cursor.execute("""
+                SELECT DISTINCT date(timestamp) as event_date, camera_id, entity_type
+                FROM traffic_events
+            """)
+            date_combos = cursor.fetchall()
+            synthetic_sightings = []
+            for row in date_combos:
+                edate = row["event_date"]
+                cam = row["camera_id"]
+                ent = row["entity_type"]
+                extra_count = random.randint(18, 45)
+                for _ in range(extra_count):
+                    hr = random.randint(7, 21)
+                    mn = random.randint(0, 59)
+                    sc = random.randint(0, 59)
+                    ts_str = f"{edate} {hr:02d}:{mn:02d}:{sc:02d}"
+                    tid = random.randint(20000, 99999)
+                    v_type = "Peaton" if ent == "PEDESTRIAN" else random.choice(["Automovil", "Automovil", "Camion", "Motocicleta"])
+                    conf = round(random.uniform(0.65, 0.94), 2)
+                    synthetic_sightings.append((ts_str, cam, tid, v_type, ent, conf, 0))
+
+            if synthetic_sightings:
+                cursor.executemany("""
+                    INSERT OR IGNORE INTO camera_sightings (timestamp, camera_id, track_id, vehicle_type, entity_type, confidence, crossed)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, synthetic_sightings)
+                conn.commit()
 
     # Sembrar ubicaciones y campañas si no existen
     with get_connection() as conn:
@@ -591,6 +1063,19 @@ def seed_sample_data_if_empty() -> None:
                 (14, 'cli_banco', 'banco_azteca_credito_nomina_15s.mp4', 'Crédito Nómina Inmediato en tu App', 15, '1920x1080', 60, 175, 3500, 17800, 4.3, 'En rotación'),
                 (15, 'cli_retail', 'liverpool_venta_nocturna_ofertas_15s.mp4', 'Gran Venta Nocturna — Exclusivo Tarjetas', 15, '1920x1080', 60, 210, 4200, 24300, 5.9, 'En rotación')
             """)
+            conn.commit()
+
+        # Sembrar usuarios por defecto (Administrador y Cliente de demostración) si no existen
+        cursor.execute("SELECT COUNT(*) as count FROM users")
+        if cursor.fetchone()["count"] == 0:
+            admin_pwd = auth_service.hash_password("admin123")
+            client_pwd = auth_service.hash_password("cliente123")
+            cursor.execute("""
+                INSERT INTO users (id, email, nombre, password_hash, rol, cliente_id, activo)
+                VALUES 
+                ('usr_admin_master', 'admin@apexcompany.com.mx', 'Administrador Apex', ?, 'admin', NULL, 1),
+                ('usr_cliente_cerveceria', 'marketing@heineken.com.mx', 'Gerente DOOH Heineken/Minerva', ?, 'cliente', 'cli_cerveceria', 1)
+            """, (admin_pwd, client_pwd))
             conn.commit()
 
 
@@ -1037,5 +1522,401 @@ def delete_hardware_device(device_id: str) -> bool:
         cursor.execute("DELETE FROM hardware_devices WHERE id = ?", (device_id,))
         conn.commit()
         return cursor.rowcount > 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MÓDULO DE MONITOREO DE HARDWARE: CONEXIONES Y DESCONEXIONES DE CÁMARAS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def record_camera_connection_event(
+    camera_id: str,
+    event_type: str,
+    status: str,
+    source: str = "",
+    details: str = "",
+    duration_offline_sec: float = 0.0,
+    duration_online_sec: float = 0.0,
+    event_time: Optional[datetime.datetime] = None
+) -> int:
+    """
+    Registra un evento de conectividad de cámara (CONNECTED, DISCONNECTED, RECONNECTING, ERROR, ENABLED, DISABLED).
+    """
+    if event_time is None:
+        event_time = datetime.datetime.now()
+    time_str = event_time.strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO camera_connection_logs 
+            (timestamp, camera_id, event_type, status, source, details, duration_offline_sec, duration_online_sec)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (time_str, camera_id, event_type.upper(), status.upper(), str(source), str(details), round(float(duration_offline_sec), 1), round(float(duration_online_sec), 1)))
+        conn.commit()
+        return cursor.lastrowid or 0
+
+
+def get_camera_connection_logs(
+    camera_id: str = "all",
+    limit: int = 100,
+    offset: int = 0,
+    date_str: Optional[str] = None,
+    event_type: str = "all"
+) -> dict:
+    """
+    Obtiene la bitácora de eventos de conectividad de cámaras con filtros y duración formateada.
+    """
+    query = "SELECT * FROM camera_connection_logs WHERE 1=1"
+    params: list[Any] = []
+    
+    if camera_id != "all":
+        query += " AND camera_id = ?"
+        params.append(camera_id)
+        
+    if date_str:
+        query += " AND date(timestamp) = ?"
+        params.append(date_str)
+        
+    if event_type != "all":
+        query += " AND event_type = ?"
+        params.append(event_type.upper())
+        
+    count_query = query.replace("SELECT *", "SELECT COUNT(*)")
+    
+    query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+    params_with_paging = list(params) + [limit, offset]
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(count_query, params)
+        total_count = cursor.fetchone()[0]
+        
+        cursor.execute(query, params_with_paging)
+        rows = cursor.fetchall()
+        
+        def format_sec(s: float) -> str:
+            if s <= 0:
+                return "--"
+            if s < 60:
+                return f"{int(s)}s"
+            m = int(s // 60)
+            sec = int(s % 60)
+            if m < 60:
+                return f"{m}m {sec}s"
+            h = int(m // 60)
+            m = int(m % 60)
+            return f"{h}h {m}m"
+
+        records = []
+        for r in rows:
+            dur_off = r["duration_offline_sec"] or 0.0
+            dur_on = r["duration_online_sec"] or 0.0
+            records.append({
+                "id": r["id"],
+                "timestamp": r["timestamp"],
+                "camera_id": r["camera_id"],
+                "event_type": r["event_type"],
+                "status": r["status"],
+                "source": r["source"] or "",
+                "details": r["details"] or "",
+                "duration_offline_sec": dur_off,
+                "duration_online_sec": dur_on,
+                "duration_offline_formatted": format_sec(dur_off),
+                "duration_online_formatted": format_sec(dur_on),
+            })
+            
+        return {
+            "total": total_count,
+            "limit": limit,
+            "offset": offset,
+            "records": records
+        }
+
+
+def get_camera_connection_stats(camera_id: str = "all", date_str: Optional[str] = None) -> dict:
+    """
+    Retorna métricas de disponibilidad (uptime, caídas, downtime) para hoy o una fecha dada.
+    """
+    if not date_str:
+        date_str = datetime.date.today().strftime("%Y-%m-%d")
+        
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        
+        where = "WHERE date(timestamp) = ?"
+        params: list[Any] = [date_str]
+        if camera_id != "all":
+            where += " AND camera_id = ?"
+            params.append(camera_id)
+            
+        cursor.execute(f"""
+            SELECT 
+                COUNT(*) as total_events,
+                SUM(CASE WHEN event_type = 'DISCONNECTED' THEN 1 ELSE 0 END) as disconnect_count,
+                SUM(CASE WHEN event_type = 'CONNECTED' THEN 1 ELSE 0 END) as connect_count,
+                SUM(duration_offline_sec) as total_offline_sec,
+                SUM(duration_online_sec) as total_online_sec
+            FROM camera_connection_logs
+            {where}
+        """, params)
+        row = cursor.fetchone()
+        
+        total_events = row["total_events"] or 0
+        disconnect_count = row["disconnect_count"] or 0
+        connect_count = row["connect_count"] or 0
+        total_offline_sec = row["total_offline_sec"] or 0.0
+        total_online_sec = row["total_online_sec"] or 0.0
+        
+        # Último evento registrado
+        last_event_query = f"SELECT * FROM camera_connection_logs {where} ORDER BY id DESC LIMIT 1"
+        cursor.execute(last_event_query, params)
+        last_event = cursor.fetchone()
+        last_event_dict = dict(last_event) if last_event else None
+        
+        # Desglose por cámara
+        cam_where = "WHERE date(timestamp) = ?"
+        cursor.execute(f"""
+            SELECT 
+                camera_id,
+                COUNT(*) as total_events,
+                SUM(CASE WHEN event_type = 'DISCONNECTED' THEN 1 ELSE 0 END) as disconnects,
+                SUM(duration_offline_sec) as downtime_sec
+            FROM camera_connection_logs
+            {cam_where}
+            GROUP BY camera_id
+        """, [date_str])
+        by_camera = {}
+        for cr in cursor.fetchall():
+            by_camera[cr["camera_id"]] = {
+                "total_events": cr["total_events"],
+                "disconnects": cr["disconnects"] or 0,
+                "downtime_sec": round(cr["downtime_sec"] or 0.0, 1)
+            }
+            
+        now = datetime.datetime.now()
+        seconds_so_far_today = (now.hour * 3600) + (now.minute * 60) + now.second
+        if seconds_so_far_today <= 0:
+            seconds_so_far_today = 86400
+            
+        uptime_pct = 100.0
+        if total_offline_sec > 0:
+            uptime_pct = max(0.0, min(100.0, 100.0 * (1.0 - (total_offline_sec / max(1.0, seconds_so_far_today)))))
+            
+        return {
+            "date": date_str,
+            "camera_id": camera_id,
+            "total_events": total_events,
+            "disconnect_count": disconnect_count,
+            "connect_count": connect_count,
+            "total_offline_sec": round(total_offline_sec, 1),
+            "total_online_sec": round(total_online_sec, 1),
+            "uptime_percentage": round(uptime_pct, 2),
+            "last_event": last_event_dict,
+            "by_camera": by_camera
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FUNCIONES DE GESTIÓN DE USUARIOS, AUTENTICACIÓN E INVITACIONES
+# ─────────────────────────────────────────────────────────────────────────────
+
+def create_user(
+    email: str,
+    nombre: str,
+    password_hash: str,
+    rol: str = "cliente",
+    cliente_id: Optional[str] = None,
+    activo: int = 1
+) -> dict[str, Any]:
+    """Crea un nuevo usuario en la plataforma."""
+    user_id = f"usr_{uuid.uuid4().hex[:12]}"
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO users (id, email, nombre, password_hash, rol, cliente_id, activo)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, email.strip().lower(), nombre.strip(), password_hash, rol, cliente_id, activo))
+        conn.commit()
+    return get_user_by_id(user_id)  # type: ignore
+
+
+def get_user_by_email(email: str) -> Optional[dict[str, Any]]:
+    """Busca un usuario por su correo electrónico."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT u.*, c.name as cliente_nombre
+            FROM users u
+            LEFT JOIN clients c ON u.cliente_id = c.id
+            WHERE LOWER(u.email) = LOWER(?)
+        """, (email.strip(),))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_user_by_id(user_id: str) -> Optional[dict[str, Any]]:
+    """Busca un usuario por su ID primario."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT u.*, c.name as cliente_nombre
+            FROM users u
+            LEFT JOIN clients c ON u.cliente_id = c.id
+            WHERE u.id = ?
+        """, (user_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_all_users() -> list[dict[str, Any]]:
+    """Retorna la lista de todos los usuarios registrados (sin password_hash)."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT u.id, u.email, u.nombre, u.rol, u.cliente_id, u.activo, u.creado_en, c.name as cliente_nombre
+            FROM users u
+            LEFT JOIN clients c ON u.cliente_id = c.id
+            ORDER BY u.creado_en DESC
+        """)
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def toggle_user_status(user_id: str) -> bool:
+    """Activa o desactiva un usuario existente."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET activo = CASE WHEN activo = 1 THEN 0 ELSE 1 END WHERE id = ?", (user_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def change_user_role(user_id: str, new_role: str) -> bool:
+    """Modifica el rol de un usuario ('admin' o 'cliente')."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET rol = ? WHERE id = ?", (new_role, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def delete_user(user_id: str) -> bool:
+    """Elimina permanentemente un usuario."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def create_invitation(
+    email: str,
+    nombre: str,
+    rol: str = "cliente",
+    cliente_id: Optional[str] = None,
+    token: Optional[str] = None,
+    hours_valid: int = 168
+) -> dict[str, Any]:
+    """
+    Crea un registro de invitación con token criptográfico válido por X horas (default 7 días).
+    """
+    inv_id = f"inv_{uuid.uuid4().hex[:12]}"
+    if not token:
+        token = auth_service.generate_invitation_token()
+        
+    expira_dt = datetime.datetime.now() + datetime.timedelta(hours=hours_valid)
+    expira_str = expira_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO invitations (id, email, nombre, rol, cliente_id, token, estado, expira_en)
+            VALUES (?, ?, ?, ?, ?, ?, 'pendiente', ?)
+        """, (inv_id, email.strip().lower(), nombre.strip(), rol, cliente_id, token, expira_str))
+        conn.commit()
+        
+    return get_invitation_by_token(token)  # type: ignore
+
+
+def get_invitation_by_token(token: str) -> Optional[dict[str, Any]]:
+    """Obtiene el detalle de una invitación a través de su token."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT i.*, c.name as cliente_nombre
+            FROM invitations i
+            LEFT JOIN clients c ON i.cliente_id = c.id
+            WHERE i.token = ?
+        """, (token,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        res = dict(row)
+        try:
+            expira_dt = datetime.datetime.strptime(res["expira_en"], "%Y-%m-%d %H:%M:%S")
+            if datetime.datetime.now() > expira_dt and res["estado"] == "pendiente":
+                res["estado"] = "expirada"
+        except Exception:
+            pass
+        return res
+
+
+def get_all_invitations() -> list[dict[str, Any]]:
+    """Lista todas las invitaciones generadas por el administrador."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT i.*, c.name as cliente_nombre
+            FROM invitations i
+            LEFT JOIN clients c ON i.cliente_id = c.id
+            ORDER BY i.creado_en DESC
+        """)
+        rows = cursor.fetchall()
+        inv_list = []
+        now = datetime.datetime.now()
+        for r in rows:
+            d = dict(r)
+            try:
+                expira_dt = datetime.datetime.strptime(d["expira_en"], "%Y-%m-%d %H:%M:%S")
+                if now > expira_dt and d["estado"] == "pendiente":
+                    d["estado"] = "expirada"
+            except Exception:
+                pass
+            inv_list.append(d)
+        return inv_list
+
+
+def accept_invitation(token: str, password_hash: str) -> Optional[dict[str, Any]]:
+    """
+    Acepta una invitación válida, crea o actualiza la cuenta de usuario con la contraseña
+    proporcionada y marca la invitación como 'aceptada'.
+    """
+    inv = get_invitation_by_token(token)
+    if not inv:
+        return None
+    if inv["estado"] != "pendiente":
+        return None
+
+    existing_user = get_user_by_email(inv["email"])
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        if existing_user:
+            cursor.execute("""
+                UPDATE users 
+                SET password_hash = ?, nombre = ?, rol = ?, cliente_id = ?, activo = 1
+                WHERE email = ?
+            """, (password_hash, inv["nombre"], inv["rol"], inv["cliente_id"], inv["email"]))
+            user_id = existing_user["id"]
+        else:
+            user_id = f"usr_{uuid.uuid4().hex[:12]}"
+            cursor.execute("""
+                INSERT INTO users (id, email, nombre, password_hash, rol, cliente_id, activo)
+                VALUES (?, ?, ?, ?, ?, ?, 1)
+            """, (user_id, inv["email"], inv["nombre"], password_hash, inv["rol"], inv["cliente_id"]))
+            
+        cursor.execute("UPDATE invitations SET estado = 'aceptada' WHERE token = ?", (token,))
+        conn.commit()
+
+    return get_user_by_id(user_id)
+
+
 
 

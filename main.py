@@ -24,6 +24,8 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 import shutil
+import random
+import base64
 
 import cv2
 import numpy as np
@@ -31,7 +33,9 @@ import uvicorn
 import io
 import csv
 from pydantic import BaseModel
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Response, UploadFile, File, Form
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Response, UploadFile, File, Form, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -46,6 +50,7 @@ import novastar_vx600
 import shelly_controller
 import campaign_manager
 import solar_brightness_engine
+import auth_service
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN DE LOGGING
@@ -84,6 +89,74 @@ thread_pool = ThreadPoolExecutor(max_workers=len(config.CAMERA_SOURCES) + 2)
 # Clientes WebSocket conectados
 ws_clients: list[WebSocket] = []
 
+# Bucle de eventos principal para callbacks asíncronos desde hilos secundarios
+main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+async def broadcast_payload_to_ws(payload: str) -> None:
+    """Envía un payload de texto a todos los clientes WebSocket de manera asíncrona."""
+    if not ws_clients:
+        return
+    disconnected = []
+    for client in ws_clients:
+        try:
+            await client.send_text(payload)
+        except Exception:
+            disconnected.append(client)
+    for client in disconnected:
+        if client in ws_clients:
+            ws_clients.remove(client)
+
+
+def handle_camera_status_change(
+    camera_id: str,
+    event_type: str,
+    status: str,
+    source: str,
+    details: str,
+    duration_offline_sec: float = 0.0,
+    duration_online_sec: float = 0.0,
+) -> None:
+    """
+    Manejador invocado por CameraStream al detectar un cambio de conectividad o hardware.
+    1. Persiste el evento en SQLite (tabla camera_connection_logs).
+    2. Emite alerta en tiempo real a clientes WebSocket.
+    """
+    logger.info(f"[CAMERA STATUS] [{camera_id}] Evento={event_type} | Estado={status} | {details}")
+    try:
+        database.record_camera_connection_event(
+            camera_id=camera_id,
+            event_type=event_type,
+            status=status,
+            source=source,
+            details=details,
+            duration_offline_sec=duration_offline_sec,
+            duration_online_sec=duration_online_sec,
+        )
+    except Exception as exc:
+        logger.error(f"Error guardando camera_connection_event en BD: {exc}")
+
+    # Notificar a los WebSockets de forma thread-safe
+    global main_loop
+    if main_loop and main_loop.is_running():
+        payload = json.dumps({
+            "type": "camera_status_alert",
+            "data": {
+                "camera_id": camera_id,
+                "event_type": event_type,
+                "status": status,
+                "source": source,
+                "details": details,
+                "duration_offline_sec": duration_offline_sec,
+                "duration_online_sec": duration_online_sec,
+                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+        })
+        try:
+            asyncio.run_coroutine_threadsafe(broadcast_payload_to_ws(payload), main_loop)
+        except Exception as ws_err:
+            logger.debug(f"No se pudo despachar broadcast WS para cámara {camera_id}: {ws_err}")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LIFESPAN: INICIAR Y DETENER RECURSOS
@@ -96,7 +169,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
       - Al arrancar: inicializa streams, analizadores y lanza el loop de inferencia.
       - Al cerrar: detiene hilos y libera recursos limpiamente.
     """
-    global streams, analyzers
+    global streams, analyzers, main_loop
+    main_loop = asyncio.get_running_loop()
 
     logger.info("=== Iniciando sistema de analítica de tráfico ===")
 
@@ -112,15 +186,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     if lines_file.exists():
         try:
             saved_lines = json.loads(lines_file.read_text(encoding="utf-8"))
-            for cam, coords in saved_lines.items():
-                if len(coords) == 2 and len(coords[0]) == 2 and len(coords[1]) == 2:
-                    config.COUNTING_LINES[cam] = ((coords[0][0], coords[0][1]), (coords[1][0], coords[1][1]))
-            logger.info("Líneas persistentes cargadas desde lines.json")
+            for cam, raw_l in saved_lines.items():
+                norm = config.normalize_counting_lines(cam, raw_l)
+                config.MULTI_COUNTING_LINES[cam] = norm
+                if norm:
+                    config.COUNTING_LINES[cam] = norm[0]["coords"]
+            logger.info("Líneas persistentes cargadas y normalizadas desde lines.json")
         except Exception as e:
             logger.error(f"Error al cargar lines.json: {e}")
 
     # ── Inicializar streams de captura ───────────────────────────────────────
-    streams = create_all_streams()
+    streams = create_all_streams(status_callback=handle_camera_status_change)
     logger.info(f"Streams iniciados: {list(streams.keys())}")
 
     # ── Inicializar analizadores (carga el modelo YOLO una vez por cámara) ──
@@ -170,6 +246,15 @@ static_dir = Path(__file__).parent / "static"
 static_dir.mkdir(parents=True, exist_ok=True)
 (static_dir / "uploads" / "logos").mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# ── CONFIGURACIÓN CORS UNIFICADA (WEB + BACKEND) ─────────────────────────────
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 
@@ -310,6 +395,460 @@ async def solar_auto_brightness_loop() -> None:
             logger.debug(f"Error en loop solar auto: {e}")
             
         await asyncio.sleep(60.0)  # Verificar cada 60 segundos
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODELOS PYDANTIC Y AUTENTICACIÓN UNIFICADA (APEX WEB + DOOH VISION)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class RegisterRequest(BaseModel):
+    nombre: str
+    email: str
+    password: str
+    rol: Optional[str] = "cliente"
+    cliente_id: Optional[str] = None
+
+class UserUpdateRequest(BaseModel):
+    nombre: Optional[str] = None
+    shelly_cloud_api_key: Optional[str] = None
+    shelly_cloud_server: Optional[str] = None
+
+class InviteUserRequest(BaseModel):
+    nombre: str
+    email: str
+    rol: Optional[str] = "cliente"
+    cliente_id: Optional[str] = None
+    send_email: Optional[bool] = True
+
+class AcceptInviteRequest(BaseModel):
+    token: str
+    password: str
+
+security = HTTPBearer(auto_error=False)
+
+def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[dict]:
+    if not credentials:
+        return None
+    payload = auth_service.decode_access_token(credentials.credentials)
+    if not payload or not payload.get("sub"):
+        return None
+    return database.get_user_by_id(payload.get("sub"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RUTAS — AUTENTICACIÓN Y SESIONES
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/auth/login", summary="Iniciar sesión de usuario")
+def auth_login(req: LoginRequest):
+    user = database.get_user_by_email(req.email)
+    if not user:
+        raise HTTPException(status_code=401, detail="Email o contraseña incorrectos")
+    if not auth_service.verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Email o contraseña incorrectos")
+    if not user.get("activo", 1):
+        raise HTTPException(status_code=403, detail="Tu cuenta está desactivada. Contacta al administrador.")
+    
+    token = auth_service.create_access_token({
+        "sub": user["id"],
+        "email": user["email"],
+        "rol": user["rol"]
+    })
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["id"],
+            "nombre": user["nombre"],
+            "email": user["email"],
+            "rol": user["rol"],
+            "cliente_id": user.get("cliente_id"),
+            "activo": bool(user.get("activo", 1)),
+            "creado_en": str(user.get("creado_en", "")),
+            "cliente_nombre": user.get("cliente_nombre")
+        }
+    }
+
+
+@app.post("/auth/register", summary="Registro directo de usuario")
+def auth_register(req: RegisterRequest):
+    existing = database.get_user_by_email(req.email)
+    if existing:
+        raise HTTPException(status_code=400, detail="El correo ya se encuentra registrado en el sistema")
+    
+    pwd_hash = auth_service.hash_password(req.password)
+    user = database.create_user(
+        email=req.email,
+        nombre=req.nombre,
+        password_hash=pwd_hash,
+        rol=req.rol or "cliente",
+        cliente_id=req.cliente_id
+    )
+    token = auth_service.create_access_token({
+        "sub": user["id"],
+        "email": user["email"],
+        "rol": user["rol"]
+    })
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["id"],
+            "nombre": user["nombre"],
+            "email": user["email"],
+            "rol": user["rol"],
+            "cliente_id": user.get("cliente_id"),
+            "activo": bool(user.get("activo", 1)),
+            "creado_en": str(user.get("creado_en", "")),
+            "cliente_nombre": user.get("cliente_nombre")
+        }
+    }
+
+
+@app.get("/auth/me", summary="Obtener perfil del usuario autenticado")
+def auth_me(user: Optional[dict] = Depends(get_current_user)):
+    if not user:
+        raise HTTPException(status_code=401, detail="No autorizado o sesión expirada")
+    return {
+        "id": user["id"],
+        "nombre": user["nombre"],
+        "email": user["email"],
+        "rol": user["rol"],
+        "cliente_id": user.get("cliente_id"),
+        "activo": bool(user.get("activo", 1)),
+        "creado_en": str(user.get("creado_en", "")),
+        "cliente_nombre": user.get("cliente_nombre")
+    }
+
+
+@app.put("/auth/me", summary="Actualizar perfil del usuario autenticado")
+def auth_update_me(req: UserUpdateRequest, user: Optional[dict] = Depends(get_current_user)):
+    if not user:
+        raise HTTPException(status_code=401, detail="No autorizado")
+    if req.nombre:
+        with database.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET nombre = ? WHERE id = ?", (req.nombre, user["id"]))
+            conn.commit()
+    updated = database.get_user_by_id(user["id"])
+    return {
+        "id": updated["id"],
+        "nombre": updated["nombre"],
+        "email": updated["email"],
+        "rol": updated["rol"],
+        "cliente_id": updated.get("cliente_id"),
+        "activo": bool(updated.get("activo", 1)),
+        "creado_en": str(updated.get("creado_en", "")),
+        "cliente_nombre": updated.get("cliente_nombre")
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RUTAS — INVITACIONES POR CORREO Y ACTIVACIÓN DE CUENTA
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/admin/invite", summary="Dar de alta y enviar invitación a nuevo usuario")
+def admin_invite_user(req: InviteUserRequest):
+    token = auth_service.generate_invitation_token()
+    inv = database.create_invitation(
+        email=req.email,
+        nombre=req.nombre,
+        rol=req.rol or "cliente",
+        cliente_id=req.cliente_id,
+        token=token
+    )
+
+    # Obtener nombre de la empresa/cliente si fue especificado
+    empresa_nombre = "Apex Company — DOOH & Smart Cities"
+    if req.cliente_id:
+        clients = database.get_clients()
+        matched = next((c for c in clients if c["id"] == req.cliente_id), None)
+        if matched:
+            empresa_nombre = matched["name"]
+
+    invitation_url = f"http://localhost:3000/auth/invite?token={token}"
+    email_html = auth_service.render_invitation_email_html(
+        nombre=req.nombre,
+        email=req.email,
+        rol=req.rol or "cliente",
+        empresa_nombre=empresa_nombre,
+        invitation_url=invitation_url
+    )
+
+    email_status = {"sent": False, "method": "none"}
+    if req.send_email:
+        email_status = auth_service.send_invitation_email(
+            to_email=req.email,
+            subject=f"Invitación de Acceso a Apex Company — {empresa_nombre}",
+            html_content=email_html
+        )
+
+    return {
+        "success": True,
+        "invitation": inv,
+        "invitation_token": token,
+        "invitation_url": invitation_url,
+        "email_status": email_status,
+        "message": f"Usuario {req.email} dado de alta. Enlace de invitación listo para activación."
+    }
+
+
+@app.get("/admin/invitations", summary="Listar todas las invitaciones")
+def admin_get_invitations():
+    return database.get_all_invitations()
+
+
+@app.get("/auth/invite/verify", summary="Verificar validez de token de invitación")
+def auth_verify_invitation(token: str = Query(..., description="Token de invitación")):
+    inv = database.get_invitation_by_token(token)
+    if not inv:
+        return {"valid": False, "reason": "Invitación no encontrada"}
+    if inv.get("estado") == "aceptada":
+        return {"valid": False, "reason": "Esta invitación ya fue utilizada previamente"}
+    if inv.get("estado") == "expirada":
+        return {"valid": False, "reason": "El plazo de esta invitación ha expirado. Solicita una nueva."}
+    return {"valid": True, "invitation": inv}
+
+
+@app.post("/auth/invite/accept", summary="Aceptar invitación y establecer contraseña")
+def auth_accept_invitation(req: AcceptInviteRequest):
+    inv = database.get_invitation_by_token(req.token)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invitación inválida o inexistente")
+    if inv.get("estado") != "pendiente":
+        raise HTTPException(status_code=400, detail=f"La invitación no está disponible ({inv.get('estado')})")
+    
+    pwd_hash = auth_service.hash_password(req.password)
+    user = database.accept_invitation(req.token, pwd_hash)
+    if not user:
+        raise HTTPException(status_code=500, detail="Error al activar la cuenta de usuario")
+    
+    token = auth_service.create_access_token({
+        "sub": user["id"],
+        "email": user["email"],
+        "rol": user["rol"]
+    })
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["id"],
+            "nombre": user["nombre"],
+            "email": user["email"],
+            "rol": user["rol"],
+            "cliente_id": user.get("cliente_id"),
+            "activo": bool(user.get("activo", 1)),
+            "creado_en": str(user.get("creado_en", "")),
+            "cliente_nombre": user.get("cliente_nombre")
+        }
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RUTAS — ADMINISTRACIÓN Y CONTROL DE USUARIOS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/admin/users", summary="Lista de todos los usuarios registrados")
+def admin_get_users():
+    users = database.get_all_users()
+    for u in users:
+        u["activo"] = bool(u.get("activo", 1))
+    return users
+
+
+@app.put("/admin/users/{user_id}/toggle", summary="Activar / Desactivar usuario")
+def admin_toggle_user(user_id: str):
+    database.toggle_user_status(user_id)
+    user = database.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    user["activo"] = bool(user.get("activo", 1))
+    return user
+
+
+@app.put("/admin/users/{user_id}/role", summary="Cambiar rol de usuario")
+def admin_change_role(user_id: str, rol: str = Query(..., description="Nuevo rol")):
+    database.change_user_role(user_id, rol)
+    user = database.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    user["activo"] = bool(user.get("activo", 1))
+    return user
+
+
+@app.delete("/admin/users/{user_id}", summary="Eliminar usuario")
+def admin_delete_user(user_id: str):
+    success = database.delete_user(user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return {"status": "deleted", "id": user_id}
+
+
+@app.get("/admin/stats", summary="Estadísticas globales de la plataforma")
+def admin_global_stats():
+    users = database.get_all_users()
+    total_users = len(users)
+    devices = database.get_hardware_devices()
+    total_devices = len(devices)
+    active_devices = sum(1 for d in devices if d.get("status") == "online")
+
+    with database.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as count FROM traffic_events")
+        total_traffic = cursor.fetchone()["count"]
+        cursor.execute("SELECT COUNT(*) as count FROM camera_sightings")
+        total_sightings = cursor.fetchone()["count"]
+        cursor.execute("SELECT COUNT(*) as count FROM campaigns WHERE status = 'Activa'")
+        active_campaigns = cursor.fetchone()["count"]
+
+    return {
+        "total_usuarios": total_users,
+        "total_dispositivos": total_devices,
+        "dispositivos_activos": active_devices,
+        "total_lecturas": total_traffic + total_sightings,
+        "campanas_activas": active_campaigns,
+        "eventos_trafico": total_traffic
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RUTAS — DISPOSITIVOS SHELLY Y HARDWARE COMPATIBLES CON APEX PORTAL
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/devices/", summary="Lista de dispositivos Shelly / Hardware")
+@app.get("/admin/devices", summary="Lista administrativa de dispositivos")
+def get_devices_list():
+    hw = database.get_hardware_devices()
+    locs = {l["id"]: l["name"] for l in database.get_locations()}
+    res = []
+    for d in hw:
+        ip = d.get("ip_address", "127.0.0.1")
+        is_shelly = d.get("device_type") == "SHELLY_PRO"
+        status_info = shelly_controller.get_status(ip, 0) if is_shelly else {"is_on": True, "power_w": 280.0}
+        
+        res.append({
+            "id": d["id"],
+            "usuario_id": "usr_admin_master",
+            "nombre": d["name"],
+            "modelo": f"{d.get('device_type')} ({ip}:{d.get('port')})",
+            "webhook_token": f"wh_{d['id']}",
+            "estado_rele": status_info.get("is_on", True),
+            "watts_actuales": status_info.get("power_w", 0.0),
+            "ubicacion": locs.get(d.get("location_id"), "Pantalla Exterior"),
+            "activo": d.get("status") == "online",
+            "creado_en": str(d.get("created_at", "2026-01-01 00:00:00")),
+            "ultima_lectura": datetime.datetime.now().isoformat()
+        })
+    return res
+
+
+@app.get("/devices/{device_id}", summary="Detalle de un dispositivo")
+def get_device_detail(device_id: str):
+    devices = get_devices_list()
+    found = next((d for d in devices if d["id"] == device_id), None)
+    if not found:
+        raise HTTPException(status_code=404, detail="Dispositivo no encontrado")
+    return found
+
+
+@app.get("/relay/{device_id}/status", summary="Estado del relé")
+def relay_status(device_id: str):
+    hw = database.get_hardware_devices()
+    found = next((d for d in hw if d["id"] == device_id), None)
+    ip = found.get("ip_address", "192.168.1.150") if found else "192.168.1.150"
+    st = shelly_controller.get_status(ip, 0)
+    return {
+        "device_id": device_id,
+        "estado_rele": st.get("is_on", True),
+        "watts_actuales": st.get("power_w", 4500.0),
+        "ultima_lectura": datetime.datetime.now().isoformat()
+    }
+
+
+@app.post("/relay/{device_id}/on", summary="Encender relé Shelly")
+def relay_turn_on(device_id: str):
+    hw = database.get_hardware_devices()
+    found = next((d for d in hw if d["id"] == device_id), None)
+    ip = found.get("ip_address", "192.168.1.150") if found else "192.168.1.150"
+    shelly_controller.set_power(ip, True, 0)
+    status_data = shelly_controller.get_status(ip, 0)
+    return {
+        "device_id": device_id,
+        "estado_rele": True,
+        "watts_actuales": status_data.get("power_w", 4500.0)
+    }
+
+
+@app.post("/relay/{device_id}/off", summary="Apagar relé Shelly")
+def relay_turn_off(device_id: str):
+    hw = database.get_hardware_devices()
+    found = next((d for d in hw if d["id"] == device_id), None)
+    ip = found.get("ip_address", "192.168.1.150") if found else "192.168.1.150"
+    shelly_controller.set_power(ip, False, 0)
+    status_data = shelly_controller.get_status(ip, 0)
+    return {
+        "device_id": device_id,
+        "estado_rele": False,
+        "watts_actuales": status_data.get("power_w", 18.0)
+    }
+
+
+@app.get("/consumption/{device_id}/summary", summary="Resumen de consumo")
+def consumption_summary(device_id: str):
+    hw = database.get_hardware_devices()
+    found = next((d for d in hw if d["id"] == device_id), None)
+    ip = found.get("ip_address", "192.168.1.150") if found else "192.168.1.150"
+    st = shelly_controller.get_status(ip, 0)
+    return {
+        "dispositivo_id": device_id,
+        "kwh_total": st.get("total_kwh", 342.8),
+        "watts_promedio": 4450.0,
+        "watts_pico": 5120.0,
+        "total_lecturas": 1440,
+        "costo_estimado_mxn": round(st.get("total_kwh", 342.8) * 3.85, 2)
+    }
+
+
+@app.get("/consumption/{device_id}/chart", summary="Gráfica de consumo")
+def consumption_chart(device_id: str, hours: int = 24, interval: str = "hour"):
+    now = datetime.datetime.now()
+    points = []
+    for h in range(hours, -1, -1):
+        t = now - datetime.timedelta(hours=h)
+        is_day = 8 <= t.hour <= 21
+        base_w = 4600.0 if is_day else 350.0
+        points.append({
+            "timestamp": t.strftime("%Y-%m-%d %H:00:00"),
+            "watts_promedio": round(base_w + random.uniform(-150, 200), 1),
+            "watts_max": round(base_w + 350, 1),
+            "watts_min": round(base_w - 200, 1),
+            "lecturas": 60
+        })
+    return points
+
+
+@app.get("/consumption/{device_id}/history", summary="Historial de consumo")
+def consumption_history(device_id: str, limit: int = 100):
+    now = datetime.datetime.now()
+    records = []
+    for i in range(min(limit, 50)):
+        t = now - datetime.timedelta(minutes=i * 15)
+        records.append({
+            "id": i + 1,
+            "dispositivo_id": device_id,
+            "timestamp": t.strftime("%Y-%m-%d %H:%M:%S"),
+            "watts": round(random.uniform(4300, 4800), 1),
+            "estado_rele": True,
+            "voltaje": round(random.uniform(219, 222), 1),
+            "corriente": round(random.uniform(19.5, 21.8), 2),
+            "energia_total_kwh": round(340.0 + (i * 0.1), 3),
+            "fuente": "Shelly Pro RPC"
+        })
+    return records
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -572,40 +1111,170 @@ class LineUpdate(BaseModel):
     start: tuple[int, int]
     end: tuple[int, int]
 
-@app.get("/api/line/{cam_id}", summary="Obtener línea actual de la cámara")
+
+class SingleLineModel(BaseModel):
+    id: Optional[str] = None
+    name: Optional[str] = None
+    target_entity: Optional[str] = "ALL"
+    coords: Optional[list[list[int]]] = None
+    start: Optional[list[int]] = None
+    end: Optional[list[int]] = None
+
+
+class MultiLineUpdate(BaseModel):
+    lines: list[SingleLineModel]
+
+
+@app.get("/api/lines/{cam_id}", summary="Obtener todas las líneas de conteo configuradas para la cámara")
+async def get_lines(cam_id: str) -> JSONResponse:
+    if cam_id not in analyzers:
+        raise HTTPException(status_code=404, detail=f"Cámara '{cam_id}' no encontrada.")
+    analyzer = analyzers[cam_id]
+    lines_list = [l.to_dict() for l in analyzer.counting_lines.values()]
+    return JSONResponse({
+        "status": "ok",
+        "cam_id": cam_id,
+        "lines": lines_list
+    })
+
+
+@app.post("/api/lines/{cam_id}", summary="Actualizar y guardar la lista de líneas de conteo de la cámara")
+async def update_lines_endpoint(cam_id: str, payload: MultiLineUpdate) -> JSONResponse:
+    if cam_id not in analyzers:
+        raise HTTPException(status_code=404, detail=f"Cámara '{cam_id}' no encontrada.")
+    
+    formatted_lines = []
+    for idx, l in enumerate(payload.lines):
+        lid = l.id or f"{cam_id}_line_{idx+1}"
+        lname = l.name or f"Línea {idx+1}"
+        ent = (l.target_entity or "ALL").upper()
+        
+        # Extraer coordenadas
+        if l.coords and len(l.coords) == 2:
+            coords = ((int(l.coords[0][0]), int(l.coords[0][1])), (int(l.coords[1][0]), int(l.coords[1][1])))
+        elif l.start and l.end:
+            coords = ((int(l.start[0]), int(l.start[1])), (int(l.end[0]), int(l.end[1])))
+        else:
+            coords = ((50, config.FRAME_HEIGHT // 2), (config.FRAME_WIDTH - 50, config.FRAME_HEIGHT // 2))
+
+        formatted_lines.append({
+            "id": lid,
+            "name": lname,
+            "target_entity": ent,
+            "coords": coords
+        })
+
+    # 1. Actualizar configuración en memoria
+    config.MULTI_COUNTING_LINES[cam_id] = formatted_lines
+    if formatted_lines:
+        config.COUNTING_LINES[cam_id] = formatted_lines[0]["coords"]
+
+    # 2. Persistir en lines.json
+    lines_file = Path("lines.json")
+    saved_lines = {}
+    if lines_file.exists():
+        try:
+            saved_lines = json.loads(lines_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+            
+    saved_lines[cam_id] = [
+        {
+            "id": fl["id"],
+            "name": fl["name"],
+            "target_entity": fl["target_entity"],
+            "coords": [list(fl["coords"][0]), list(fl["coords"][1])]
+        }
+        for fl in formatted_lines
+    ]
+    lines_file.write_text(json.dumps(saved_lines, indent=2), encoding="utf-8")
+
+    # 3. Actualizar el analizador
+    analyzers[cam_id].update_lines(formatted_lines)
+    latest_metrics[cam_id] = analyzers[cam_id].metrics.to_dict()
+
+    return JSONResponse({
+        "status": "ok",
+        "message": f"Se guardaron {len(formatted_lines)} líneas de conteo para '{cam_id}'.",
+        "lines": [l.to_dict() for l in analyzers[cam_id].counting_lines.values()]
+    })
+
+
+@app.get("/api/line/{cam_id}", summary="Obtener línea actual de la cámara (compatibilidad)")
 async def get_line(cam_id: str) -> JSONResponse:
-    if cam_id not in config.COUNTING_LINES:
+    if cam_id not in config.COUNTING_LINES and cam_id not in analyzers:
         raise HTTPException(status_code=404, detail=f"Cámara '{cam_id}' no configurada.")
-    coords = config.COUNTING_LINES[cam_id]
+    
+    if cam_id in analyzers and analyzers[cam_id].counting_lines:
+        first_line = next(iter(analyzers[cam_id].counting_lines.values()))
+        return JSONResponse({
+            "status": "ok",
+            "cam_id": cam_id,
+            "line": {"start": first_line.coords[0], "end": first_line.coords[1]},
+            "lines": [l.to_dict() for l in analyzers[cam_id].counting_lines.values()]
+        })
+
+    coords = config.COUNTING_LINES.get(cam_id, ((50, 360), (1230, 360)))
     return JSONResponse({
         "status": "ok",
         "cam_id": cam_id,
         "line": {"start": coords[0], "end": coords[1]}
     })
 
-@app.post("/api/line/{cam_id}", summary="Actualizar línea de conteo")
+
+@app.post("/api/line/{cam_id}", summary="Actualizar línea de conteo (compatibilidad)")
 async def update_line(cam_id: str, line_data: LineUpdate) -> JSONResponse:
     if cam_id not in analyzers:
         raise HTTPException(status_code=404, detail=f"Cámara '{cam_id}' no encontrada.")
     
     new_coords = (line_data.start, line_data.end)
-    
-    # 1. Actualizar configuración en memoria
     config.COUNTING_LINES[cam_id] = new_coords
     
-    # 2. Persistir en disco
+    # Actualizar primera línea o agregar
+    analyzer = analyzers[cam_id]
+    if analyzer.counting_lines:
+        first_key = next(iter(analyzer.counting_lines.keys()))
+        first_line = analyzer.counting_lines[first_key]
+        first_line.coords = new_coords
+        lines_cfg = [
+            {
+                "id": l.id,
+                "name": l.name,
+                "target_entity": l.target_entity,
+                "coords": l.coords
+            }
+            for l in analyzer.counting_lines.values()
+        ]
+    else:
+        lines_cfg = [{
+            "id": f"{cam_id}_line_1",
+            "name": "Línea Principal",
+            "target_entity": "ALL",
+            "coords": new_coords
+        }]
+        
+    config.MULTI_COUNTING_LINES[cam_id] = lines_cfg
+    
     lines_file = Path("lines.json")
     saved_lines = {}
     if lines_file.exists():
         try:
             saved_lines = json.loads(lines_file.read_text(encoding="utf-8"))
-        except:
+        except Exception:
             pass
-    saved_lines[cam_id] = new_coords
+    saved_lines[cam_id] = [
+        {
+            "id": l["id"],
+            "name": l["name"],
+            "target_entity": l["target_entity"],
+            "coords": [list(l["coords"][0]), list(l["coords"][1])]
+        }
+        for l in lines_cfg
+    ]
     lines_file.write_text(json.dumps(saved_lines, indent=2), encoding="utf-8")
     
-    # 3. Actualizar el analizador
-    analyzers[cam_id].update_line(new_coords)
+    analyzers[cam_id].update_lines(lines_cfg)
+    latest_metrics[cam_id] = analyzers[cam_id].metrics.to_dict()
     
     return JSONResponse({
         "status": "ok",
@@ -676,7 +1345,7 @@ async def api_camera_add(req: CameraAddRequest) -> JSONResponse:
     # Agregar a globales
     config.CAMERA_SOURCES[req.cam_id] = req.source
     
-    stream = CameraStream(req.cam_id, req.source)
+    stream = CameraStream(req.cam_id, req.source, on_status_change=handle_camera_status_change)
     streams[req.cam_id] = stream
     stream.start()
     
@@ -709,6 +1378,102 @@ async def api_cameras() -> JSONResponse:
     return JSONResponse({"status": "ok", "cameras": cam_status})
 
 
+@app.get("/api/cameras/connection-logs", summary="Bitácora de eventos de conexión y desconexión de cámaras")
+async def api_camera_connection_logs(
+    camera_id: str = Query("all", description="ID de cámara o 'all'"),
+    limit: int = Query(50, description="Cantidad máxima de registros"),
+    offset: int = Query(0, description="Desplazamiento para paginación"),
+    date: Optional[str] = Query(None, description="Fecha YYYY-MM-DD"),
+    event_type: str = Query("all", description="Filtro de evento (all, CONNECTED, DISCONNECTED, ERROR, RECONNECTING, etc.)")
+) -> JSONResponse:
+    """Devuelve los registros históricos y recientes de conectividad de los equipos de cámara."""
+    data = database.get_camera_connection_logs(
+        camera_id=camera_id,
+        limit=limit,
+        offset=offset,
+        date_str=date,
+        event_type=event_type
+    )
+    return JSONResponse({"status": "ok", "data": data})
+
+
+@app.get("/api/cameras/connection-stats", summary="Estadísticas de disponibilidad y tiempo fuera de línea de cámaras")
+async def api_camera_connection_stats(
+    camera_id: str = Query("all", description="ID de cámara o 'all'"),
+    date: Optional[str] = Query(None, description="Fecha YYYY-MM-DD")
+) -> JSONResponse:
+    """Retorna métricas de disponibilidad (uptime %, total desconexiones, tiempo fuera de línea)."""
+    stats = database.get_camera_connection_stats(camera_id=camera_id, date_str=date)
+    live_states = {}
+    for cid, st in streams.items():
+        is_enabled = getattr(st, "enabled", True) and (cid in active_processing)
+        live_states[cid] = {
+            "source": str(st.source),
+            "connected": st.connected if is_enabled else False,
+            "enabled": is_enabled,
+            "fps": round(st.fps, 1) if is_enabled else 0.0,
+            "reconnect_count": getattr(st, "reconnect_count", 0),
+        }
+    stats["live_cameras"] = live_states
+    return JSONResponse({"status": "ok", "data": stats})
+
+
+@app.get("/api/cameras/connection-logs/export-csv", summary="Exportar bitácora de conexiones de cámaras a CSV")
+async def api_camera_connection_logs_export_csv(
+    camera_id: str = Query("all", description="ID de cámara o 'all'"),
+    date: Optional[str] = Query(None, description="Fecha YYYY-MM-DD"),
+    event_type: str = Query("all", description="Filtro de evento")
+) -> Response:
+    """Genera y descarga un archivo CSV con la bitácora completa de conexiones y desconexiones."""
+    data = database.get_camera_connection_logs(
+        camera_id=camera_id,
+        limit=5000,
+        offset=0,
+        date_str=date,
+        event_type=event_type
+    )
+    records = data.get("records", [])
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "ID",
+        "Fecha y Hora",
+        "Cámara",
+        "Tipo de Evento",
+        "Estado",
+        "Fuente / Origen",
+        "Tiempo Fuera de Línea (seg)",
+        "Tiempo Fuera de Línea (Legible)",
+        "Tiempo en Línea (seg)",
+        "Tiempo en Línea (Legible)",
+        "Diagnóstico / Detalles"
+    ])
+
+    for r in records:
+        writer.writerow([
+            r["id"],
+            r["timestamp"],
+            r["camera_id"],
+            r["event_type"],
+            r["status"],
+            r["source"],
+            r["duration_offline_sec"],
+            r["duration_offline_formatted"],
+            r["duration_online_sec"],
+            r["duration_online_formatted"],
+            r["details"]
+        ])
+
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    filename = f"bitacora_conexiones_camaras_{date or 'historico'}.csv"
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINTS DE ANALÍTICA HISTÓRICA Y REGISTRO DE EVENTOS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -716,50 +1481,57 @@ async def api_cameras() -> JSONResponse:
 @app.get("/api/history/summary", summary="Resumen ejecutivo de KPIs históricos")
 async def api_history_summary(
     camera_id: str = Query("all", description="ID de cámara o 'all'"),
-    date: str | None = Query(None, description="Fecha YYYY-MM-DD")
+    date: str | None = Query(None, description="Fecha YYYY-MM-DD"),
+    entity_type: str = Query("all", description="Filtro: 'all', 'vehicle', 'pedestrian'")
 ) -> JSONResponse:
-    """Retorna KPIs ejecutivos: aforo total, in, out, hora pico, tiempo de estancia y composición."""
-    data = database.get_kpis(camera_id=camera_id, date_str=date)
+    """Retorna KPIs ejecutivos: aforo total, in, out, hora pico, tiempo de estancia y desglose vehicular y peatonal."""
+    data = database.get_kpis(camera_id=camera_id, date_str=date, entity_type=entity_type)
     return JSONResponse({"status": "ok", "data": data})
 
 
 @app.get("/api/history/hourly", summary="Métricas de aforo por hora (00:00 - 23:00)")
 async def api_history_hourly(
     camera_id: str = Query("all", description="ID de cámara o 'all'"),
-    date: str | None = Query(None, description="Fecha YYYY-MM-DD")
+    date: str | None = Query(None, description="Fecha YYYY-MM-DD"),
+    entity_type: str = Query("all", description="Filtro: 'all', 'vehicle', 'pedestrian'")
 ) -> JSONResponse:
-    """Retorna la distribución horaria completa para gráficas de barras y detección de horas pico."""
-    data = database.get_hourly_metrics(camera_id=camera_id, date_str=date)
+    """Retorna la distribución horaria completa con desglose dual vehicular y peatonal."""
+    data = database.get_hourly_metrics(camera_id=camera_id, date_str=date, entity_type=entity_type)
     return JSONResponse({"status": "ok", "data": data})
 
 
 @app.get("/api/history/daily", summary="Tendencia diaria histórica")
 async def api_history_daily(
     camera_id: str = Query("all", description="ID de cámara o 'all'"),
-    days: int = Query(7, description="Cantidad de días hacia atrás (7, 14, 30)")
+    days: int = Query(7, description="Cantidad de días hacia atrás (7, 14, 30)"),
+    entity_type: str = Query("all", description="Filtro: 'all', 'vehicle', 'pedestrian'")
 ) -> JSONResponse:
-    """Retorna el volumen total de vehículos por día."""
-    data = database.get_daily_metrics(camera_id=camera_id, days=days)
+    """Retorna el volumen diario por día para vehículos y peatones."""
+    data = database.get_daily_metrics(camera_id=camera_id, days=days, entity_type=entity_type)
     return JSONResponse({"status": "ok", "data": data})
 
 
 @app.get("/api/history/events", summary="Registro filtrado y paginado de eventos de cruce")
 async def api_history_events(
     camera_id: str = Query("all"),
+    line_id: str = Query("all"),
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
     vehicle_type: str = Query("all"),
     direction: str = Query("all"),
+    entity_type: str = Query("all", description="'all', 'vehicle', 'pedestrian'"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0)
 ) -> JSONResponse:
-    """Consulta la bitácora de eventos con filtros dinámicos."""
+    """Consulta la bitácora de eventos con filtros dinámicos incluyendo tipo de entidad y línea."""
     data = database.get_events(
         camera_id=camera_id,
+        line_id=line_id,
         start_date=start_date,
         end_date=end_date,
         vehicle_type=vehicle_type,
         direction=direction,
+        entity_type=entity_type,
         limit=limit,
         offset=offset
     )
@@ -769,45 +1541,51 @@ async def api_history_events(
 @app.get("/api/history/export/csv", summary="Exportar eventos a archivo CSV para Excel")
 async def api_history_export_csv(
     camera_id: str = Query("all"),
+    line_id: str = Query("all"),
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
     vehicle_type: str = Query("all"),
-    direction: str = Query("all")
+    direction: str = Query("all"),
+    entity_type: str = Query("all")
 ) -> Response:
     """Genera y descarga un archivo CSV con el historial de eventos para análisis y auditoría."""
     data = database.get_events(
         camera_id=camera_id,
+        line_id=line_id,
         start_date=start_date,
         end_date=end_date,
         vehicle_type=vehicle_type,
         direction=direction,
+        entity_type=entity_type,
         limit=5000,
         offset=0
     )
     
     output = io.StringIO()
     writer = csv.writer(output)
-    # Encabezados
-    writer.writerow(["ID", "Fecha_Hora", "Camara", "Track_ID", "Tipo_Vehiculo", "Sentido", "Confianza", "Tiempo_Permanencia_Seg"])
+    # Encabezados en español con acentos limpios
+    writer.writerow(["ID", "Fecha_Hora", "Cámara", "Línea_Aforo", "Track_ID", "Clase_Objeto", "Tipo_Entidad", "Sentido", "Confianza", "Tiempo_Permanencia_Seg"])
     
     for ev in data["events"]:
         writer.writerow([
             ev["id"],
             ev["timestamp"],
             ev["camera_id"],
+            ev.get("line_id", "line_1"),
             ev["track_id"],
             ev["vehicle_type"],
+            ev.get("entity_type", "VEHICLE"),
             ev["direction"],
             ev["confidence"],
             ev["dwell_time"]
         ])
         
-    csv_content = output.getvalue()
-    filename = f"reporte_aforo_vehicular_{camera_id}_{start_date or 'inicio'}.csv"
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    filename = f"reporte_aforo_multimodal_{camera_id}_{start_date or 'inicio'}.csv"
     
     return Response(
-        content=csv_content,
-        media_type="text/csv",
+        content=csv_bytes,
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
@@ -939,6 +1717,14 @@ async def api_campaign_videos(campaign_id: int) -> JSONResponse:
     """Obtiene los spots registrados para una campaña específica."""
     videos = database.get_campaign_videos(campaign_id=campaign_id)
     return JSONResponse({"status": "ok", "videos": videos})
+
+
+@app.get("/api/videos", summary="Lista general de videos y spots DOOH")
+async def api_all_videos(client_id: Optional[str] = None, location_id: Optional[str] = None) -> JSONResponse:
+    """Retorna todos los spots de video registrados para clientes y pantallas."""
+    videos = database.get_campaign_videos(client_id=client_id, location_id=location_id)
+    return JSONResponse(videos)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1434,11 +2220,36 @@ async def report_print_view(
     daily_kwh = round(power_kw * 16.5, 2)
     energy_cost = round(daily_kwh * loc.get("cost_per_kwh", 3.85), 2)
 
-    # Cálculos acumulados
-    total_veh = kpis.get("total_flow", 0)
+    # Cálculos acumulados y doble métrica (Vistos en Cámara vs Cruces por Línea)
+    veh_kpis = kpis.get("vehicles", {})
+    ped_kpis = kpis.get("pedestrians", {})
+
+    total_flow = kpis.get("total_flow", 0)
+    total_seen = kpis.get("total_seen", 0)
+    total_crossed = kpis.get("total_crossed", 0)
+    crossing_rate = kpis.get("crossing_rate", 0.0)
     total_in = kpis.get("total_in", 0)
     total_out = kpis.get("total_out", 0)
-    impressions = int(total_veh * 1.6)
+
+    v_seen = veh_kpis.get("seen", 0)
+    v_crossed = veh_kpis.get("crossed", 0)
+    v_rate = veh_kpis.get("crossing_rate", 0.0)
+    v_flow = veh_kpis.get("total_flow", 0)
+    v_in = veh_kpis.get("total_in", 0)
+    v_out = veh_kpis.get("total_out", 0)
+
+    p_seen = ped_kpis.get("seen", 0)
+    p_crossed = ped_kpis.get("crossed", 0)
+    p_rate = ped_kpis.get("crossing_rate", 0.0)
+    p_flow = ped_kpis.get("total_flow", 0)
+    p_in = ped_kpis.get("total_in", 0)
+    p_out = ped_kpis.get("total_out", 0)
+
+    # Impactos DOOH: factor 1.6 por vehículo + 1.0 por peatón
+    impressions = int((v_crossed * 1.6) + (p_crossed * 1.0))
+    if impressions == 0 and total_flow > 0:
+        impressions = int(total_flow * 1.6)
+
     avg_dwell = kpis.get("avg_dwell_seconds", 8.4)
     peak_hr = kpis.get("peak_hour", "18:00 - 19:00")
 
@@ -1456,23 +2267,42 @@ async def report_print_view(
         campaign_cost = energy_cost
         campaign_impressions = impressions
 
-    # Generar barras SVG para la gráfica horaria
+    # Generar barras SVG para la gráfica horaria con separación vehicular y peatonal
     chart_bars = ""
-    max_count = max([h.get("count", 0) for h in hourly_data], default=100) or 1
+    max_count = max([h.get("total", 0) for h in hourly_data], default=10) or 1
+    if max_count == 0:
+        max_count = 1
     for h in hourly_data:
         hr_str = h.get("hour", "00:00")
         try:
             hr_num = int(hr_str.split(":")[0])
         except Exception:
             hr_num = 0
-        cnt = h.get("count", 0)
-        height = int((cnt / max_count) * 110)
-        y = 120 - height
+        tot = h.get("total", 0)
+        v_cnt = h.get("vehicles_total", 0)
+        p_cnt = h.get("pedestrians_total", 0)
+
+        # Si no hay desglose específico pero sí total general
+        if v_cnt == 0 and p_cnt == 0 and tot > 0:
+            v_cnt = tot
+
+        h_veh = int((v_cnt / max_count) * 90) if max_count > 0 else 0
+        h_ped = int((p_cnt / max_count) * 90) if max_count > 0 else 0
+
+        y_veh = 115 - h_veh
+        y_ped = y_veh - h_ped
         x = 35 + (hr_num * 27)
+
+        veh_bar = f'<rect x="{x}" y="{y_veh}" width="18" height="{h_veh}" fill="#0284c7" rx="2" opacity="0.9"><title>{v_cnt} Vehículos</title></rect>' if h_veh > 0 else ""
+        ped_bar = f'<rect x="{x}" y="{y_ped}" width="18" height="{h_ped}" fill="#10b981" rx="2" opacity="0.9"><title>{p_cnt} Peatones</title></rect>' if h_ped > 0 else ""
+        total_lbl = f'<text x="{x + 9}" y="{max(12, y_ped - 3)}" font-size="7" font-weight="bold" fill="#0f172a" text-anchor="middle">{tot}</text>' if tot > 0 else ""
+
         chart_bars += f"""
         <g>
-          <rect x="{x}" y="{y}" width="18" height="{height}" fill="#0284c7" rx="3" opacity="0.85"/>
-          <text x="{x + 9}" y="135" font-size="8" fill="#64748b" text-anchor="middle">{hr_num:02d}</text>
+          {veh_bar}
+          {ped_bar}
+          {total_lbl}
+          <text x="{x + 9}" y="132" font-size="8" fill="#64748b" text-anchor="middle">{hr_num:02d}</text>
         </g>
         """
 
@@ -1530,11 +2360,11 @@ async def report_print_view(
     # Filas de desglose vehicular
     veh_rows = ""
     for v in types_breakdown:
-        pct = round((v["count"] / max(1, total_veh)) * 100, 1)
+        pct = round((v["count"] / max(1, total_flow)) * 100, 1)
         veh_rows += f"""
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dashed #cbd5e1; font-size: 12px;">
           <span style="font-weight: 600; color: #1e293b;">{v['type']}</span>
-          <span style="color: #475569;"><strong style="color: #0f172a;">{v['count']:,}</strong> veh ({pct}%)</span>
+          <span style="color: #475569;"><strong style="color: #0f172a;">{v['count']:,}</strong> ({pct}%)</span>
         </div>
         """
 
@@ -1656,7 +2486,7 @@ async def report_print_view(
   <style>
     @page {{
       size: A4 portrait;
-      margin: 12mm 15mm 15mm 15mm;
+      margin: 10mm 12mm 12mm 12mm;
     }}
     * {{ box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }}
     body {{
@@ -1679,6 +2509,7 @@ async def report_print_view(
     }}
     @media print {{
       .no-print {{ display: none !important; }}
+      body {{ margin: 0; }}
     }}
     .btn {{
       background: #0284c7;
@@ -1697,29 +2528,43 @@ async def report_print_view(
       width: 100%;
       border-bottom: 2px solid #0284c7;
       padding-bottom: 12px;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }}
     .kpi-grid {{
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-      margin-bottom: 16px;
+      gap: 10px;
+      margin-bottom: 10px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }}
+    .kpi-grid-sub {{
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 14px;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }}
     .kpi-card {{
       background: #f8fafc;
       border: 1px solid #e2e8f0;
       border-radius: 6px;
-      padding: 10px 12px;
+      padding: 9px 11px;
       text-align: center;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }}
     .kpi-card .val {{
-      font-size: 20px;
+      font-size: 19px;
       font-weight: 900;
       color: #0f172a;
       line-height: 1.2;
     }}
     .kpi-card .lbl {{
-      font-size: 10px;
+      font-size: 9.5px;
       font-weight: 700;
       text-transform: uppercase;
       color: #64748b;
@@ -1732,14 +2577,18 @@ async def report_print_view(
       color: #0f172a;
       border-left: 4px solid #0284c7;
       padding-left: 6px;
-      margin: 14px 0 8px 0;
+      margin: 12px 0 6px 0;
       letter-spacing: 0.5px;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }}
     table.data-table {{
       width: 100%;
       border-collapse: collapse;
       font-size: 11px;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }}
     table.data-table th {{
       background: #f1f5f9;
@@ -1749,13 +2598,19 @@ async def report_print_view(
       font-weight: 700;
       border-bottom: 2px solid #cbd5e1;
     }}
+    table.data-table tr {{
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }}
     .footer-watermark {{
-      margin-top: 24px;
+      margin-top: 20px;
       border-top: 1px solid #cbd5e1;
-      padding-top: 10px;
+      padding-top: 8px;
       text-align: center;
       font-size: 10px;
       color: #64748b;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }}
     .footer-watermark strong {{
       color: #0284c7;
@@ -1811,27 +2666,51 @@ async def report_print_view(
   <!-- Ficha Técnica -->
   {ficha_tecnica}
 
-  <!-- Métricas Principales (KPIs) -->
+  <!-- Métricas Principales (KPIs Multimodales con Doble Métrica) -->
   <div class="kpi-grid">
     <div class="kpi-card">
-      <div class="lbl">Aforo Vehicular Total</div>
-      <div class="val">{total_veh:,}</div>
-      <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Cruce validado con IA</div>
+      <div class="lbl">Aforo Total Auditado</div>
+      <div class="val">{total_flow:,} <span style="font-size: 11px; font-weight: normal; color: #64748b;">cruces</span></div>
+      <div style="font-size: 9.5px; color: #64748b; margin-top: 2px;">
+        Entradas: <strong style="color: #059669;">{total_in:,}</strong> | Salidas: <strong style="color: #d97706;">{total_out:,}</strong>
+      </div>
     </div>
     <div class="kpi-card">
-      <div class="lbl">Impactos Estimados</div>
-      <div class="val" style="color: #059669;">{impressions:,}</div>
-      <div style="font-size: 10px; color: #64748b; margin-top: 2px;">1.6 ocupantes / veh.</div>
+      <div class="lbl">Impactos Estimados DOOH</div>
+      <div class="val" style="color: #0284c7;">{impressions:,}</div>
+      <div style="font-size: 9.5px; color: #64748b; margin-top: 2px;">1.6x ocupación veh + 1.0x peatonal</div>
     </div>
     <div class="kpi-card">
-      <div class="lbl">Tiempo en Escena</div>
-      <div class="val" style="color: #d97706;">{avg_dwell} seg</div>
-      <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Visibilidad de pantalla</div>
+      <div class="lbl">Vehículos (Doble Métrica)</div>
+      <div class="val" style="color: #0369a1;">{v_crossed:,} <span style="font-size: 11px; font-weight: normal; color: #64748b;">cruces</span></div>
+      <div style="font-size: 9.5px; color: #475569; margin-top: 2px;">
+        👁️ <strong>{v_seen:,}</strong> vistos ({v_rate}% en línea)
+      </div>
     </div>
     <div class="kpi-card">
+      <div class="lbl">Peatones (Doble Métrica)</div>
+      <div class="val" style="color: #059669;">{p_crossed:,} <span style="font-size: 11px; font-weight: normal; color: #64748b;">cruces</span></div>
+      <div style="font-size: 9.5px; color: #475569; margin-top: 2px;">
+        👁️ <strong>{p_seen:,}</strong> vistos ({p_rate}% en línea)
+      </div>
+    </div>
+  </div>
+
+  <div class="kpi-grid-sub">
+    <div class="kpi-card" style="padding: 7px 10px;">
+      <div class="lbl">Tiempo Promedio en Escena</div>
+      <div class="val" style="font-size: 16px; color: #d97706;">{avg_dwell} seg</div>
+      <div style="font-size: 9px; color: #64748b;">Permanencia visual ante pantalla</div>
+    </div>
+    <div class="kpi-card" style="padding: 7px 10px;">
       <div class="lbl">Hora Pico Máxima</div>
-      <div class="val" style="font-size: 16px; color: #7c3aed; margin-top: 6px;">{peak_hr}</div>
-      <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Mayor concentración</div>
+      <div class="val" style="font-size: 14px; color: #7c3aed; margin-top: 2px;">{peak_hr}</div>
+      <div style="font-size: 9px; color: #64748b;">Mayor concentración de tráfico</div>
+    </div>
+    <div class="kpi-card" style="padding: 7px 10px;">
+      <div class="lbl">Tasa Global de Cruce</div>
+      <div class="val" style="font-size: 16px; color: #0284c7;">{crossing_rate}%</div>
+      <div style="font-size: 9px; color: #64748b;">{total_crossed:,} cruzan de {total_seen:,} vistos</div>
     </div>
   </div>
 
@@ -1839,19 +2718,31 @@ async def report_print_view(
   {tabla_central}
 
   <!-- Gráfica de Tráfico y Desglose por Tipo de Vehículo -->
-  <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px;">
+  <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 14px; margin-bottom: 14px; page-break-inside: avoid; break-inside: avoid;">
     <div>
-      <div class="section-title">Curva de Flujo Horario de Tráfico (24 Horas)</div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <div class="section-title" style="margin: 0;">Curva de Flujo Horario (24 Horas)</div>
+        <div style="display: flex; gap: 12px; font-size: 10px; font-weight: 700;">
+          <span style="display: flex; align-items: center; gap: 4px; color: #0284c7;">
+            <span style="width: 9px; height: 9px; background: #0284c7; border-radius: 2px; display: inline-block;"></span>
+            Vehículos ({v_flow:,})
+          </span>
+          <span style="display: flex; align-items: center; gap: 4px; color: #10b981;">
+            <span style="width: 9px; height: 9px; background: #10b981; border-radius: 2px; display: inline-block;"></span>
+            Peatones ({p_flow:,})
+          </span>
+        </div>
+      </div>
       <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; background: #fafafa;">
         <svg viewBox="0 0 700 145" style="width: 100%; height: auto;">
-          <line x1="20" y1="120" x2="680" y2="120" stroke="#cbd5e1" stroke-width="1" />
+          <line x1="20" y1="115" x2="680" y2="115" stroke="#cbd5e1" stroke-width="1" />
           <line x1="20" y1="65" x2="680" y2="65" stroke="#f1f5f9" stroke-dasharray="4 4" stroke-width="1" />
           {chart_bars}
         </svg>
       </div>
     </div>
     <div>
-      <div class="section-title">Composición del Tráfico</div>
+      <div class="section-title" style="margin-top: 0;">Composición del Tráfico</div>
       <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; background: #fafafa;">
         {veh_rows}
       </div>
@@ -1875,6 +2766,104 @@ async def report_print_view(
 </html>
 """
     return HTMLResponse(content=html)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RUTAS — TELEMETRÍA EDGE INTEL NUC (PUSH DESDE SITIO HACIA LA NUBE)
+# ─────────────────────────────────────────────────────────────────────────────
+
+latest_nuc_snapshots: dict[str, bytes] = {}
+latest_nuc_heartbeat: dict[str, float] = {}
+
+
+class NucTelemetryPayload(BaseModel):
+    nuc_id: str
+    api_key: Optional[str] = None
+    timestamp: float
+    cameras: dict = {}
+    shelly: Optional[dict] = None
+    novastar: Optional[dict] = None
+    snapshot_base64: Optional[str] = None
+    camera_id_snapshot: Optional[str] = None
+
+
+@app.post("/api/telemetry/push")
+async def receive_nuc_telemetry(payload: NucTelemetryPayload) -> dict:
+    """
+    Recibe la telemetría en tiempo real procesada localmente en la Intel NUC (Edge).
+    Actualiza el estado de las cámaras en la nube y despacha actualizaciones por WebSocket.
+    """
+    global latest_metrics
+    now = time.time()
+    latest_nuc_heartbeat[payload.nuc_id] = now
+
+    # Actualizar métricas en memoria
+    for cam_id, metrics in payload.cameras.items():
+        latest_metrics[cam_id] = metrics
+
+    # Guardar snapshot si fue provisto
+    if payload.snapshot_base64 and payload.camera_id_snapshot:
+        try:
+            img_data = base64.b64decode(payload.snapshot_base64)
+            latest_nuc_snapshots[payload.camera_id_snapshot] = img_data
+        except Exception as e:
+            logger.debug(f"Error decodificando snapshot de NUC: {e}")
+
+    # Notificar por WebSocket a los clientes web conectados
+    ws_payload = json.dumps({
+        "type": "metrics_update",
+        "cameras": latest_metrics,
+        "server_time": now,
+        "source": "nuc_edge",
+        "nuc_id": payload.nuc_id,
+    })
+    asyncio.create_task(broadcast_payload_to_ws(ws_payload))
+
+    return {
+        "status": "ok",
+        "message": f"Telemetría de NUC '{payload.nuc_id}' recibida y distribuida",
+        "cameras_updated": list(payload.cameras.keys()),
+        "timestamp": now,
+    }
+
+
+@app.get("/api/telemetry/snapshot/{camera_id}")
+async def get_nuc_snapshot(camera_id: str):
+    """
+    Retorna la última imagen JPEG capturada y procesada por la Intel NUC para esta cámara.
+    """
+    if camera_id in latest_nuc_snapshots:
+        return Response(content=latest_nuc_snapshots[camera_id], media_type="image/jpeg")
+    
+    # Si no hay snapshot de NUC pero el servidor local tiene CameraStream activo
+    stream = streams.get(camera_id)
+    if stream:
+        frame = stream.read()
+        if frame is not None:
+            _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            return Response(content=jpeg.tobytes(), media_type="image/jpeg")
+            
+    raise HTTPException(status_code=404, detail=f"No hay snapshot disponible para '{camera_id}'")
+
+
+@app.get("/api/telemetry/status")
+async def get_nuc_status() -> dict:
+    """
+    Informa el estado de conexión de las NUCs que reportan a la nube.
+    """
+    now = time.time()
+    nuc_states = {}
+    for nuc_id, last_seen in latest_nuc_heartbeat.items():
+        diff = now - last_seen
+        nuc_states[nuc_id] = {
+            "last_seen_sec_ago": round(diff, 1),
+            "status": "ONLINE" if diff < 15.0 else "OFFLINE",
+        }
+    return {
+        "status": "ok",
+        "nucs": nuc_states,
+        "active_cameras": list(latest_metrics.keys()),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

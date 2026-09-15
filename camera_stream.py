@@ -14,7 +14,7 @@ import cv2
 import time
 import logging
 import threading
-from typing import Optional, Union
+from typing import Optional, Union, Any, Callable
 
 import config
 
@@ -38,16 +38,18 @@ class CameraStream:
         stream.stop()
     """
 
-    def __init__(self, cam_id: str, source: Union[str, int]) -> None:
+    def __init__(self, cam_id: str, source: Union[str, int], on_status_change: Optional[Callable] = None) -> None:
         """
         Inicializa la instancia de captura SIN abrir la cámara todavía.
 
         Args:
-            cam_id  : Identificador textual de la cámara (ej. "cam1").
-            source  : URL RTSP (str) o índice de cámara USB (int).
+            cam_id           : Identificador textual de la cámara (ej. "cam1").
+            source           : URL RTSP (str) o índice de cámara USB (int).
+            on_status_change : Callback invocado en eventos de conexión/desconexión.
         """
         self.cam_id: str = cam_id
         self.source: Union[str, int] = source
+        self._status_callback: Optional[Callable] = on_status_change
 
         # Estado interno
         self._cap: Optional[cv2.VideoCapture] = None
@@ -58,18 +60,47 @@ class CameraStream:
         self._thread: Optional[threading.Thread] = None
         self._running: bool = False                  # Señal de parada limpia
 
-        # Métricas de operación
+        # Métricas de operación y tiempos de conexión
         self.fps: float = config.ASSUMED_FPS        # Se actualiza con el FPS real del stream
         self.connected: bool = False
         self.enabled: bool = True                   # Control de activación/desactivación
         self.reconnect_count: int = 0               # Contador de reconexiones acumuladas
         self.last_frame_time: float = 0.0           # Timestamp del último frame recibido
+        self._last_connect_time: float = 0.0        # Timestamp de la conexión exitosa actual
+        self._last_disconnect_time: float = 0.0     # Timestamp de la última desconexión
 
         logger.info(f"[{self.cam_id}] CameraStream creado para fuente: {self.source}")
 
     # ──────────────────────────────────────────────────────────────────────────
     # MÉTODOS PÚBLICOS
     # ──────────────────────────────────────────────────────────────────────────
+
+    def set_status_callback(self, callback: Optional[Callable]) -> None:
+        """Establece o actualiza la función callback para eventos de conexión/desconexión."""
+        self._status_callback = callback
+
+    def _notify_status(
+        self,
+        event_type: str,
+        status: str,
+        details: str,
+        duration_offline: float = 0.0,
+        duration_online: float = 0.0
+    ) -> None:
+        """Invoca el callback de notificación de estado si está configurado."""
+        if self._status_callback is not None:
+            try:
+                self._status_callback(
+                    camera_id=self.cam_id,
+                    event_type=event_type,
+                    status=status,
+                    source=str(self.source),
+                    details=details,
+                    duration_offline_sec=duration_offline,
+                    duration_online_sec=duration_online,
+                )
+            except Exception as exc:
+                logger.error(f"[{self.cam_id}] Error ejecutando status_callback: {exc}")
 
     def set_enabled(self, enabled: bool) -> bool:
         """
@@ -83,11 +114,16 @@ class CameraStream:
         self.enabled = enabled
         if enabled:
             logger.info(f"[{self.cam_id}] Reactivando captura de cámara...")
+            self._notify_status("ENABLED", "CONNECTING", "Cámara reactivada por el operador")
             self.start()
         else:
             logger.info(f"[{self.cam_id}] Desactivando captura de cámara (pausa de hardware)...")
+            now = time.time()
+            online_dur = (now - self._last_connect_time) if (self._last_connect_time > 0 and self.connected) else 0.0
+            self._last_disconnect_time = now
             self.stop()
             self.connected = False
+            self._notify_status("DISABLED", "OFFLINE", "Cámara pausada por el operador", duration_online=online_dur)
             with self._frame_lock:
                 self._frame = None
         return self.enabled
@@ -164,6 +200,13 @@ class CameraStream:
             # ── Intentar abrir la fuente ────────────────────────────────────
             if not self._open_capture():
                 retries += 1
+                if retries == 1 or retries % 5 == 0:
+                    self._notify_status(
+                        "RECONNECTING",
+                        "CONNECTING",
+                        f"Reintentando conexión ({retries}) cada {config.RTSP_RECONNECT_DELAY}s..."
+                    )
+
                 if max_retries != -1 and retries > max_retries:
                     logger.error(
                         f"[{self.cam_id}] Se alcanzó el máximo de reintentos "
@@ -194,7 +237,17 @@ class CameraStream:
                         f"[{self.cam_id}] Frame inválido recibido. "
                         "Posible desconexión del stream."
                     )
-                    self.connected = False
+                    if self.connected:
+                        now = time.time()
+                        online_dur = (now - self._last_connect_time) if self._last_connect_time > 0 else 0.0
+                        self._last_disconnect_time = now
+                        self.connected = False
+                        self._notify_status(
+                            "DISCONNECTED",
+                            "OFFLINE",
+                            "Frame inválido: cámara desconectada o señal perdida",
+                            duration_online=online_dur
+                        )
                     self._release_capture()
                     break   # Salir al bucle externo para reconectar
 
@@ -213,7 +266,17 @@ class CameraStream:
                             f"[{self.cam_id}] Sin frames por {elapsed:.1f} seg "
                             f"(timeout={config.RTSP_FRAME_TIMEOUT} seg). Reconectando..."
                         )
-                        self.connected = False
+                        if self.connected:
+                            now_t = time.time()
+                            online_dur = (now_t - self._last_connect_time) if self._last_connect_time > 0 else 0.0
+                            self._last_disconnect_time = now_t
+                            self.connected = False
+                            self._notify_status(
+                                "DISCONNECTED",
+                                "OFFLINE",
+                                f"Timeout de stream: sin frames por {elapsed:.1f} seg",
+                                duration_online=online_dur
+                            )
                         self._release_capture()
                         break
 
@@ -223,6 +286,17 @@ class CameraStream:
                     self._frame = frame
 
         # Limpieza al salir del bucle principal
+        if self.connected:
+            now = time.time()
+            online_dur = (now - self._last_connect_time) if self._last_connect_time > 0 else 0.0
+            self._last_disconnect_time = now
+            self.connected = False
+            self._notify_status(
+                "DISCONNECTED",
+                "OFFLINE",
+                "Captura finalizada",
+                duration_online=online_dur
+            )
         self.connected = False
         self._release_capture()
         logger.info(f"[{self.cam_id}] Bucle de captura finalizado.")
@@ -254,6 +328,11 @@ class CameraStream:
             if not self._cap.isOpened():
                 logger.error(f"[{self.cam_id}] No se pudo abrir la fuente: {self.source}")
                 self._cap = None
+                self._notify_status(
+                    "ERROR",
+                    "OFFLINE",
+                    f"No se pudo abrir la fuente {self.source}: dispositivo no encontrado o puerto ocupado"
+                )
                 return False
 
             # ── Configurar resolución preferida ─────────────────────────────
@@ -271,15 +350,31 @@ class CameraStream:
                     f"[{self.cam_id}] FPS no reportado. Usando valor asumido: {self.fps}"
                 )
 
-            # Registrar el momento de conexión
-            self.last_frame_time = time.time()
+            # Registrar el momento de conexión y calcular tiempo offline previo
+            now = time.time()
+            offline_dur = (now - self._last_disconnect_time) if self._last_disconnect_time > 0 else 0.0
+            self._last_connect_time = now
+            self._last_disconnect_time = 0.0
+            self.last_frame_time = now
             self.reconnect_count += 1
             logger.info(f"[{self.cam_id}] Conexión exitosa. Reconexiones totales: {self.reconnect_count}")
+            
+            self._notify_status(
+                "CONNECTED",
+                "ONLINE",
+                f"Conexión exitosa a {self.source} ({config.FRAME_WIDTH}x{config.FRAME_HEIGHT} @ {self.fps:.1f} FPS)",
+                duration_offline=offline_dur
+            )
             return True
 
         except Exception as exc:
             logger.exception(f"[{self.cam_id}] Excepción al abrir la fuente: {exc}")
             self._cap = None
+            self._notify_status(
+                "ERROR",
+                "OFFLINE",
+                f"Excepción al conectar con {self.source}: {exc}"
+            )
             return False
 
     def _release_capture(self) -> None:
@@ -311,16 +406,19 @@ class CameraStream:
 # FÁBRICA DE CÁMARAS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def create_all_streams() -> dict[str, CameraStream]:
+def create_all_streams(status_callback: Optional[Callable] = None) -> dict[str, CameraStream]:
     """
     Lee CAMERA_SOURCES desde config.py y crea + arranca todos los streams.
+
+    Args:
+        status_callback: Callback opcional invocado al conectar/desconectar.
 
     Returns:
         Dict cam_id → CameraStream (ya iniciado).
     """
     streams: dict[str, CameraStream] = {}
     for cam_id, source in config.CAMERA_SOURCES.items():
-        stream = CameraStream(cam_id=cam_id, source=source)
+        stream = CameraStream(cam_id=cam_id, source=source, on_status_change=status_callback)
         stream.start()
         streams[cam_id] = stream
         logger.info(f"Stream iniciado para cámara '{cam_id}'.")

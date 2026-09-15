@@ -62,26 +62,89 @@
       background: rgba(37, 99, 235, 0.08);
     }
 
-    /* Estilos de Impresión Formal para Informe PDF */
+    /* Estilos de Impresión Formal para Informe PDF y Auditorías */
     @media print {
-      body { background: #ffffff !important; color: #0f172a !important; }
-      #app-nav, #sidebar-stream-controls, .no-print, button, .tab-btn { display: none !important; }
-      #tab-analytics, #tab-events, #tab-campaigns { display: block !important; }
-      .print-only { display: block !important; }
-      .card-box {
+      @page {
+        size: A4 portrait;
+        margin: 10mm 12mm 12mm 12mm;
+      }
+      html, body {
+        height: auto !important;
+        min-height: 100% !important;
+        overflow: visible !important;
+        background: #ffffff !important;
+        color: #0f172a !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      main {
+        height: auto !important;
+        overflow: visible !important;
+        display: block !important;
+      }
+      /* Ocultar secciones no activas respetando la clase .hidden */
+      section.hidden, .hidden {
+        display: none !important;
+      }
+      /* Secciones activas a pantalla completa sin scrollbars */
+      section:not(.hidden) {
+        height: auto !important;
+        overflow: visible !important;
+        display: block !important;
+      }
+      /* Ocultar elementos de navegación y controles interactivos en papel */
+      #app-nav, #sidebar-stream-controls, #camera-toast-container, header,
+      .no-print, button, .tab-btn, select, input, .pagination-btn, #filter-days-span {
+        display: none !important;
+      }
+      .print-only {
+        display: block !important;
+      }
+      /* Convertir contenedores oscuros a papel blanco con bordes limpios */
+      .card-box, div[class*="bg-brand-900"], div[class*="bg-brand-950"], section[class*="bg-brand-950"] {
         background: #ffffff !important;
         border: 1px solid #cbd5e1 !important;
         color: #0f172a !important;
         box-shadow: none !important;
       }
-      .text-white { color: #0f172a !important; }
-      .text-gray-400, .text-gray-300 { color: #475569 !important; }
+      /* Tipografía con contraste óptimo para tinta de impresora */
+      .text-white, .text-slate-100, .text-slate-200 {
+        color: #0f172a !important;
+      }
+      .text-slate-300, .text-slate-400, .text-gray-400, .text-slate-500 {
+        color: #475569 !important;
+      }
+      /* Tablas de eventos y analíticas */
+      table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        background: #ffffff !important;
+      }
+      thead tr th {
+        background: #f1f5f9 !important;
+        color: #1e293b !important;
+        font-weight: 700 !important;
+        border-bottom: 2px solid #cbd5e1 !important;
+      }
+      tbody tr td {
+        background: #ffffff !important;
+        color: #1e293b !important;
+        border-bottom: 1px solid #e2e8f0 !important;
+      }
+      /* Evitar que tarjetas o filas se corten a mitad de página */
+      tr, .card-box {
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+      }
     }
     .print-only { display: none; }
   </style>
 </head>
 
 <body class="h-full bg-brand-950 text-slate-100 flex flex-col antialiased overflow-hidden">
+
+  <!-- Toast Container para Alertas de Conexión/Desconexión de Cámaras en Tiempo Real -->
+  <div id="camera-toast-container" class="fixed top-16 right-4 z-50 flex flex-col gap-2 pointer-events-none max-w-sm w-full"></div>
 
   <!-- ══ BARRA DE NAVEGACIÓN SUPERIOR (CORPORATIVA) ══════════════════════════ -->
   <header class="no-print bg-brand-900 border-b border-brand-700/60 px-5 py-2 flex items-center justify-between shrink-0 z-30 shadow-sm flex-wrap gap-3">
@@ -178,32 +241,76 @@
   <!-- ══ CONTENIDO PRINCIPAL SEGÚN PESTAÑA ═══════════════════════════════════ -->
   <main class="flex-1 overflow-hidden relative">
 
+    <!-- Encabezado Oficial para Impresión Directa desde el Navegador -->
+    <div class="print-only p-4 mb-4 border-b-2 border-blue-600 bg-white text-slate-900">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white font-black text-base shadow">A</div>
+          <div>
+            <h1 class="text-sm font-bold uppercase tracking-tight text-slate-900">APEX COMPANY — Plataforma de Analítica y Auditoría DOOH</h1>
+            <p class="text-[11px] text-slate-600">Reporte de Auditoría de Aforo Vehicular y Peatonal, Pautas e Infraestructura</p>
+          </div>
+        </div>
+        <div class="text-right text-[11px] text-slate-600">
+          <div>Certificación Oficial: <strong class="text-blue-600">apexcompany.com.mx</strong></div>
+          <div id="print-official-date" class="text-slate-500 font-mono text-[10px] mt-0.5"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- ────────────────────────────────────────────────────────────────────────
          PESTAÑA 1: MONITOREO EN VIVO
     ──────────────────────────────────────────────────────────────────────── -->
     <section id="tab-live" class="h-full flex flex-col overflow-hidden">
-      <!-- Barra de Resumen Ejecutivo Superior -->
-      <div class="no-print bg-brand-900/90 border-b border-brand-700/50 px-5 py-2 flex items-center justify-between gap-4 flex-wrap text-xs">
-        <div class="flex items-center gap-6">
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-            <span class="text-slate-400">Total Entradas:</span>
-            <span id="kpi-live-in" class="font-bold text-sm text-emerald-400">0</span>
+      <!-- Barra de Resumen Ejecutivo Superior con Separación Vehicular y Peatonal -->
+      <div class="no-print bg-brand-900/95 border-b border-brand-700/50 px-5 py-2 flex items-center justify-between gap-4 flex-wrap text-xs">
+        <div class="flex items-center gap-3 flex-wrap">
+          <!-- PANEL VEHICULAR EN VIVO -->
+          <div class="flex items-center gap-2.5 bg-brand-950/90 px-3 py-1.5 rounded-lg border border-blue-800/60 shadow-inner">
+            <span class="font-bold text-[11px] text-blue-400 flex items-center gap-1.5 uppercase tracking-wider">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0"/></svg>
+              Vehículos:
+            </span>
+            <!-- Métrica 1: Vistos en cámara -->
+            <div class="flex items-center gap-1 text-slate-300 bg-blue-950/50 px-2 py-0.5 rounded border border-blue-900/60" title="Métrica 1: Autos únicos que la cámara ha detectado en el campo visual">
+              <span class="text-[10px] text-blue-300 font-semibold">👁️ M1 Vistos:</span>
+              <span id="kpi-live-veh-seen" class="font-extrabold text-xs text-blue-200">0</span>
+              <span class="text-[9px] text-slate-400 ml-0.5">(Act: <strong id="kpi-live-veh-active" class="text-white">0</strong>)</span>
+            </div>
+            <!-- Métrica 2: Cruce de líneas -->
+            <div class="flex items-center gap-1.5 text-slate-300 bg-brand-900/80 px-2 py-0.5 rounded border border-brand-700/60" title="Métrica 2: Vehículos que atravesaron las líneas delimitadoras de conteo">
+              <span class="text-[10px] text-emerald-400 font-semibold">⚡ M2 Cruces:</span>
+              <span id="kpi-live-veh-total" class="font-extrabold text-xs text-emerald-300">0</span>
+              <div class="flex items-center gap-1 font-semibold text-[10px] ml-1 pl-1 border-l border-brand-700/60 font-mono">
+                <span class="text-emerald-400">↑<span id="kpi-live-veh-in">0</span></span>
+                <span class="text-amber-400">↓<span id="kpi-live-veh-out">0</span></span>
+              </div>
+              <span class="text-[9px] text-blue-300 font-mono ml-0.5 bg-blue-900/40 px-1 rounded" title="Tasa de cruce sobre vistos"><strong id="kpi-live-veh-rate">0%</strong> cruce</span>
+            </div>
           </div>
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-amber-400"></span>
-            <span class="text-slate-400">Total Salidas:</span>
-            <span id="kpi-live-out" class="font-bold text-sm text-amber-400">0</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-blue-400"></span>
-            <span class="text-slate-400">Flujo Neto Total:</span>
-            <span id="kpi-live-total" class="font-bold text-sm text-blue-400">0</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-indigo-400"></span>
-            <span class="text-slate-400">Vehículos en Escena:</span>
-            <span id="kpi-live-active" class="font-bold text-sm text-indigo-300">0</span>
+
+          <!-- PANEL PEATONAL EN VIVO -->
+          <div class="flex items-center gap-2.5 bg-brand-950/90 px-3 py-1.5 rounded-lg border border-purple-800/60 shadow-inner">
+            <span class="font-bold text-[11px] text-purple-400 flex items-center gap-1.5 uppercase tracking-wider">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+              Peatones:
+            </span>
+            <!-- Métrica 1: Vistos en cámara -->
+            <div class="flex items-center gap-1 text-slate-300 bg-purple-950/50 px-2 py-0.5 rounded border border-purple-900/60" title="Métrica 1: Personas únicas que la cámara ha detectado en el campo visual">
+              <span class="text-[10px] text-purple-300 font-semibold">👁️ M1 Vistos:</span>
+              <span id="kpi-live-ped-seen" class="font-extrabold text-xs text-purple-200">0</span>
+              <span class="text-[9px] text-slate-400 ml-0.5">(Act: <strong id="kpi-live-ped-active" class="text-white">0</strong>)</span>
+            </div>
+            <!-- Métrica 2: Cruce de líneas -->
+            <div class="flex items-center gap-1.5 text-slate-300 bg-brand-900/80 px-2 py-0.5 rounded border border-brand-700/60" title="Métrica 2: Personas que atravesaron las líneas delimitadoras de conteo">
+              <span class="text-[10px] text-purple-300 font-semibold">⚡ M2 Cruces:</span>
+              <span id="kpi-live-ped-total" class="font-extrabold text-xs text-purple-200">0</span>
+              <div class="flex items-center gap-1 font-semibold text-[10px] ml-1 pl-1 border-l border-brand-700/60 font-mono">
+                <span class="text-emerald-400">↑<span id="kpi-live-ped-in">0</span></span>
+                <span class="text-amber-400">↓<span id="kpi-live-ped-out">0</span></span>
+              </div>
+              <span class="text-[9px] text-purple-300 font-mono ml-0.5 bg-purple-900/40 px-1 rounded" title="Tasa de cruce sobre vistos"><strong id="kpi-live-ped-rate">0%</strong> cruce</span>
+            </div>
           </div>
         </div>
 
@@ -229,18 +336,40 @@
     ──────────────────────────────────────────────────────────────────────── -->
     <section id="tab-analytics" class="h-full hidden flex-col overflow-y-auto p-6 space-y-6 bg-brand-950">
       
-      <!-- Encabezado del Módulo de Analítica -->
-      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-brand-700/60">
+      <!-- Encabezado del Módulo de Analítica con Selector de Paneles Especializados -->
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-brand-700/60 flex-wrap">
         <div>
-          <h2 class="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-            <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-            Análisis Estadístico de Aforo y Patrones de Tráfico
-          </h2>
-          <p class="text-xs text-slate-400 mt-0.5">Indicadores consolidados por días, comportamiento horario y clasificación vehicular para toma de decisiones.</p>
+          <div class="flex items-center gap-3">
+            <h2 class="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+              <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+              Análisis Estadístico de Aforo y Movilidad
+            </h2>
+            <span id="badge-panel-active" class="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-blue-900/60 text-blue-300 border border-blue-700/50 tracking-wider">Panel Vehicular</span>
+          </div>
+          <p class="text-xs text-slate-400 mt-0.5" id="desc-panel-active">Auditoría de flujo vehicular, transporte de carga y comportamiento de flota.</p>
+        </div>
+
+        <!-- Selector de Modo de Panel (Vehicular vs Peatonal vs Dual) -->
+        <div class="flex items-center gap-1 bg-brand-900 p-1 rounded-xl border border-brand-700/80 shadow-inner no-print">
+          <button id="btn-panel-vehicle" onclick="setAnalyticsPanel('vehicle')"
+            class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-blue-600 text-white shadow-sm">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0"/></svg>
+            <span>🚗 Panel Vehicular</span>
+          </button>
+          <button id="btn-panel-pedestrian" onclick="setAnalyticsPanel('pedestrian')"
+            class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-slate-400 hover:text-white">
+            <svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+            <span>🚶 Panel Peatonal</span>
+          </button>
+          <button id="btn-panel-dual" onclick="setAnalyticsPanel('dual')"
+            class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-slate-400 hover:text-white">
+            <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            <span>📊 Comparativo Dual</span>
+          </button>
         </div>
 
         <!-- Filtros de Fecha y Cámara -->
-        <div class="flex items-center gap-3 no-print">
+        <div class="flex items-center gap-2 no-print">
           <div class="flex items-center gap-1.5 bg-brand-900 px-3 py-1.5 rounded-lg border border-brand-700">
             <label class="text-xs text-slate-400">Canal:</label>
             <select id="filter-analytics-cam" onchange="loadAnalyticsData()" class="bg-transparent text-xs text-white outline-none cursor-pointer">
@@ -257,67 +386,79 @@
           <button onclick="window.print()"
             class="px-3 py-1.5 rounded-lg bg-brand-800 hover:bg-brand-700 border border-brand-600 text-xs font-medium text-slate-200 flex items-center gap-1.5 shadow-sm transition">
             <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
-            Imprimir Informe PDF
+            <span>Informe PDF</span>
           </button>
         </div>
       </div>
 
-      <!-- Cuadrícula de KPIs Ejecutivos -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <!-- KPI 1: Volumen Total -->
+      <!-- Cuadrícula de KPIs Ejecutivos Dinámica -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <!-- KPI 1: Cruces por Líneas (Métrica 2) -->
         <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-4 shadow-sm">
           <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
-            <span>Aforo Total Registrado</span>
-            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+            <span id="kpi-card1-title">⚡ M2: Cruces por Líneas</span>
+            <span id="kpi-card1-icon">🚗</span>
           </div>
           <div class="text-2xl font-extrabold text-white" id="stat-total-flow">0</div>
-          <div class="mt-2 flex items-center gap-3 text-xs text-slate-400">
-            <span class="text-emerald-400 font-semibold" id="stat-in-count">↑ 0 In</span>
-            <span class="text-amber-400 font-semibold" id="stat-out-count">↓ 0 Out</span>
+          <div class="mt-2 flex items-center justify-between text-xs text-slate-400">
+            <div class="flex items-center gap-2">
+              <span class="text-emerald-400 font-semibold" id="stat-in-count">↑ 0 In</span>
+              <span class="text-amber-400 font-semibold" id="stat-out-count">↓ 0 Out</span>
+            </div>
           </div>
         </div>
 
-        <!-- KPI 2: Hora Pico -->
+        <!-- KPI 2: Detectados en Cámara (Métrica 1) -->
+        <div class="card-box bg-brand-900/90 border border-blue-800/60 rounded-xl p-4 shadow-sm bg-gradient-to-b from-blue-950/30 to-brand-900/90">
+          <div class="flex items-center justify-between text-blue-300 text-xs font-medium mb-1">
+            <span id="kpi-card-seen-title">👁️ M1: Vistos en Cámara</span>
+            <span>📷</span>
+          </div>
+          <div class="text-2xl font-extrabold text-blue-400" id="stat-seen-total">0</div>
+          <div class="mt-2 text-xs text-slate-400" id="stat-seen-sub">Objetos únicos captados en encuadre</div>
+        </div>
+
+        <!-- KPI 3: Tasa de Cruce / Conversión -->
         <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-4 shadow-sm">
           <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
-            <span>Hora Pico Registrada</span>
+            <span id="kpi-card-rate-title">🎯 Tasa de Cruce</span>
+            <span class="text-emerald-400">📈</span>
+          </div>
+          <div class="text-2xl font-extrabold text-emerald-400" id="stat-rate-total">0%</div>
+          <div class="mt-2 text-xs text-slate-400" id="stat-rate-sub">% de vistos que cruzaron líneas</div>
+        </div>
+
+        <!-- KPI 4: Hora Pico -->
+        <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-4 shadow-sm">
+          <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
+            <span id="kpi-card2-title">Hora Pico Registrada</span>
             <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           </div>
-          <div class="text-2xl font-extrabold text-amber-400" id="stat-peak-hour">--:--</div>
-          <div class="mt-2 text-xs text-slate-400">Período de mayor densidad de circulación</div>
+          <div class="text-xl font-extrabold text-amber-400 truncate" id="stat-peak-hour">--:--</div>
+          <div class="mt-2 text-xs text-slate-400" id="kpi-card2-sub">Mayor densidad de paso</div>
         </div>
 
-        <!-- KPI 3: Transporte Pesado / Carga -->
+        <!-- KPI 5: Tiempo Medio de Permanencia -->
         <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-4 shadow-sm">
           <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
-            <span>Transporte de Carga & Autobús</span>
-            <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-          </div>
-          <div class="text-2xl font-extrabold text-white" id="stat-heavy-percent">0%</div>
-          <div class="mt-2 text-xs text-slate-400" id="stat-heavy-count">0 vehículos pesados</div>
-        </div>
-
-        <!-- KPI 4: Tiempo Medio de Permanencia -->
-        <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-4 shadow-sm">
-          <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
-            <span>Permanencia Media en Zona</span>
+            <span id="kpi-card4-title">Permanencia Media</span>
             <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
           </div>
           <div class="text-2xl font-extrabold text-emerald-400" id="stat-avg-dwell">0.0 s</div>
-          <div class="mt-2 text-xs text-slate-400">Tiempo de tránsito en zona de lectura</div>
+          <div class="mt-2 text-xs text-slate-400" id="kpi-card4-sub">Tiempo en campo visual</div>
         </div>
       </div>
 
       <!-- Gráfico 1: Desglose por Horas del Día (00:00 - 23:00) -->
       <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-5 shadow-sm">
-        <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div>
-            <h3 class="text-sm font-bold text-white">Distribución Horaria del Flujo Vehicular (00:00 a 23:00 hrs)</h3>
-            <p class="text-xs text-slate-400">Comparativa de aforo por hora de entrada vs salida para detección de horas pico de tránsito.</p>
+            <h3 class="text-sm font-bold text-white" id="chart1-title">Distribución Horaria del Flujo (00:00 a 23:00 hrs)</h3>
+            <p class="text-xs text-slate-400" id="chart1-sub">Comparativa de aforo por hora de entrada vs salida para detección de horas pico.</p>
           </div>
-          <div class="flex items-center gap-4 text-xs font-medium">
-            <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-3 rounded bg-emerald-500 inline-block"></span> Entradas</span>
-            <span class="flex items-center gap-1.5 text-amber-400"><span class="w-3 h-3 rounded bg-amber-500 inline-block"></span> Salidas</span>
+          <div class="flex items-center gap-4 text-xs font-medium" id="chart1-legend-container">
+            <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-3 rounded bg-emerald-500 inline-block"></span> <span id="chart1-legend-1">Entradas (IN)</span></span>
+            <span class="flex items-center gap-1.5 text-amber-400"><span class="w-3 h-3 rounded bg-amber-500 inline-block"></span> <span id="chart1-legend-2">Salidas (OUT)</span></span>
           </div>
         </div>
         <div class="h-64 relative">
@@ -325,13 +466,13 @@
         </div>
       </div>
 
-      <!-- Fila de 2 Gráficos: Tendencia Diaria + Composición de Flota -->
+      <!-- Fila de 2 Gráficos: Tendencia Diaria + Composición / Segmentación -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div class="card-box lg:col-span-2 bg-brand-900/90 border border-brand-700/60 rounded-xl p-5 shadow-sm">
-          <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div>
-              <h3 class="text-sm font-bold text-white">Volumen Histórico por Días</h3>
-              <p class="text-xs text-slate-400">Tendencia acumulada del aforo vehicular en los últimos días.</p>
+              <h3 class="text-sm font-bold text-white" id="chart2-title">Volumen Histórico por Días</h3>
+              <p class="text-xs text-slate-400" id="chart2-sub">Tendencia acumulada del aforo en los últimos días.</p>
             </div>
             <select id="filter-days-span" onchange="loadAnalyticsData()" class="no-print bg-brand-950 text-xs text-slate-300 border border-brand-700 rounded px-2.5 py-1 outline-none">
               <option value="7">Últimos 7 días</option>
@@ -346,8 +487,8 @@
 
         <div class="card-box bg-brand-900/90 border border-brand-700/60 rounded-xl p-5 shadow-sm flex flex-col">
           <div>
-            <h3 class="text-sm font-bold text-white">Composición de Flota</h3>
-            <p class="text-xs text-slate-400">Desglose porcentual por categoría vehicular.</p>
+            <h3 class="text-sm font-bold text-white" id="chart3-title">Composición y Desglose</h3>
+            <p class="text-xs text-slate-400" id="chart3-sub">Distribución categórica de aforo.</p>
           </div>
           <div class="flex-1 min-h-[190px] relative flex items-center justify-center pt-2">
             <canvas id="chart-pie"></canvas>
@@ -981,6 +1122,12 @@
         </div>
 
         <div class="flex items-center gap-2 no-print">
+          <button onclick="goToCameraConnectionLogs()"
+            class="px-3 py-1.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-700 text-xs font-semibold text-cyan-300 flex items-center gap-1.5 shadow-sm transition"
+            title="Ir al registro histórico de conexiones, desconexiones y caídas de señal">
+            <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.82V15.18a1 1 0 01-1.447.89L15 14M3 8h12a2 2 0 012 2v4a2 2 0 01-2 2H3a2 2 0 01-2-2v-4a2 2 0 012-2z"/></svg>
+            Conectividad de Cámaras
+          </button>
           <button onclick="exportCSV()"
             class="px-3.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold text-white flex items-center gap-1.5 shadow-sm transition">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
@@ -995,7 +1142,7 @@
       </div>
 
       <!-- Filtros Dinámicos -->
-      <div class="no-print my-3 p-3 bg-brand-900 border border-brand-700/60 rounded-xl grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+      <div class="no-print my-3 p-3 bg-brand-900 border border-brand-700/60 rounded-xl grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
         <div>
           <label class="block text-slate-400 mb-1">Cámara:</label>
           <select id="filter-ev-cam" onchange="loadEvents(0)" class="w-full bg-brand-950 border border-brand-700 rounded px-2 py-1.5 text-slate-200 outline-none">
@@ -1003,14 +1150,23 @@
           </select>
         </div>
         <div>
-          <label class="block text-slate-400 mb-1">Tipo de Vehículo:</label>
+          <label class="block text-slate-400 mb-1">Entidad:</label>
+          <select id="filter-ev-entity" onchange="loadEvents(0)" class="w-full bg-brand-950 border border-brand-700 rounded px-2 py-1.5 text-slate-200 outline-none">
+            <option value="all">Todas (Vehículos y Peatones)</option>
+            <option value="VEHICLE">🚗 Solo Vehículos</option>
+            <option value="PEDESTRIAN">🚶 Solo Peatones</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1">Tipo de Objeto:</label>
           <select id="filter-ev-type" onchange="loadEvents(0)" class="w-full bg-brand-950 border border-brand-700 rounded px-2 py-1.5 text-slate-200 outline-none">
             <option value="all">Todos los Tipos</option>
-            <option value="Automovil">Automóvil</option>
-            <option value="Camion">Camión</option>
-            <option value="Autobus">Autobús</option>
-            <option value="Motocicleta">Motocicleta</option>
-            <option value="Bicicleta">Bicicleta</option>
+            <option value="Peaton">🚶 Peatón</option>
+            <option value="Automovil">🚗 Automóvil</option>
+            <option value="Camion">🚛 Camión</option>
+            <option value="Autobus">🚌 Autobús</option>
+            <option value="Motocicleta">🏍️ Motocicleta</option>
+            <option value="Bicicleta">🚲 Bicicleta</option>
           </select>
         </div>
         <div>
@@ -1035,7 +1191,9 @@
               <th class="py-2.5 px-4 font-semibold">Fecha y Hora</th>
               <th class="py-2.5 px-4 font-semibold">Canal / Cámara</th>
               <th class="py-2.5 px-4 font-semibold">Track ID</th>
-              <th class="py-2.5 px-4 font-semibold">Clasificación Vehicular</th>
+              <th class="py-2.5 px-4 font-semibold">Línea</th>
+              <th class="py-2.5 px-4 font-semibold">Entidad</th>
+              <th class="py-2.5 px-4 font-semibold">Clasificación</th>
               <th class="py-2.5 px-4 font-semibold">Sentido</th>
               <th class="py-2.5 px-4 font-semibold">Permanencia</th>
               <th class="py-2.5 px-4 font-semibold">Confianza</th>
@@ -1043,7 +1201,7 @@
           </thead>
           <tbody id="events-table-body" class="divide-y divide-brand-700/40 text-slate-300">
             <tr>
-              <td colspan="7" class="text-center py-8 text-slate-500">Cargando registros...</td>
+              <td colspan="9" class="text-center py-8 text-slate-500">Cargando registros...</td>
             </tr>
           </tbody>
         </table>
@@ -1116,6 +1274,113 @@
           </div>
           <div id="configured-cameras-list" class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
             <p class="text-slate-500">Cargando cámaras...</p>
+          </div>
+        </div>
+
+        <!-- ═══ BITÁCORA Y REGISTRO DE CONECTIVIDAD DE CÁMARAS (UPTIME & CAÍDAS) ═══ -->
+        <div class="col-span-1 md:col-span-2 bg-brand-900 border border-brand-700/60 rounded-xl p-5 shadow-sm space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-brand-700/60 pb-3">
+            <div>
+              <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                Bitácora de Conexiones y Desconexiones de Equipos de Cámaras
+              </h3>
+              <p class="text-xs text-slate-400 mt-0.5">Auditoría en tiempo de interrupciones, caídas de señal, tiempo fuera de línea y disponibilidad (Uptime) de cada cámara.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="exportCameraLogsCSV()" class="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-xs font-semibold text-white flex items-center gap-1.5 shadow-sm transition">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                Exportar CSV
+              </button>
+              <button onclick="loadCameraConnectionLogs(0); loadCameraConnectionStats();" class="px-3 py-1.5 rounded-lg bg-brand-800 hover:bg-brand-700 border border-brand-600 text-xs font-semibold text-slate-200 flex items-center gap-1.5 shadow-sm transition">
+                <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                Refrescar
+              </button>
+            </div>
+          </div>
+
+          <!-- Métricas de Disponibilidad (KPIs) -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div class="bg-brand-950/70 border border-brand-700/40 rounded-lg p-3">
+              <div class="text-[11px] text-slate-400">Estado de Equipos</div>
+              <div id="kpi-cam-status-summary" class="text-sm sm:text-base font-bold text-white mt-1 flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>--</span>
+              </div>
+              <div id="kpi-cam-status-sub" class="text-[10px] text-slate-500 mt-0.5">Cámaras activas</div>
+            </div>
+            <div class="bg-brand-950/70 border border-brand-700/40 rounded-lg p-3">
+              <div class="text-[11px] text-slate-400">Desconexiones Hoy</div>
+              <div id="kpi-cam-disconnects" class="text-sm sm:text-base font-bold text-amber-400 mt-1">0</div>
+              <div class="text-[10px] text-slate-500 mt-0.5">Interrupciones registradas</div>
+            </div>
+            <div class="bg-brand-950/70 border border-brand-700/40 rounded-lg p-3">
+              <div class="text-[11px] text-slate-400">Tiempo Fuera de Línea</div>
+              <div id="kpi-cam-downtime" class="text-sm sm:text-base font-bold text-rose-400 mt-1">0s</div>
+              <div class="text-[10px] text-slate-500 mt-0.5">Downtime acumulado hoy</div>
+            </div>
+            <div class="bg-brand-950/70 border border-brand-700/40 rounded-lg p-3">
+              <div class="text-[11px] text-slate-400">Disponibilidad (Uptime)</div>
+              <div id="kpi-cam-uptime" class="text-sm sm:text-base font-bold text-emerald-400 mt-1">100.0%</div>
+              <div class="text-[10px] text-slate-500 mt-0.5">SLA de servicio diario</div>
+            </div>
+          </div>
+
+          <!-- Filtros de la Bitácora -->
+          <div class="p-3 bg-brand-950/60 border border-brand-700/40 rounded-lg grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div>
+              <label class="block text-slate-400 mb-1">Filtrar por Cámara:</label>
+              <select id="filter-cam-log-id" onchange="loadCameraConnectionLogs(0)" class="w-full bg-brand-900 border border-brand-700 rounded px-2 py-1.5 text-slate-200 outline-none">
+                <option value="all">Todas las Cámaras</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">Tipo de Evento:</label>
+              <select id="filter-cam-log-event" onchange="loadCameraConnectionLogs(0)" class="w-full bg-brand-900 border border-brand-700 rounded px-2 py-1.5 text-slate-200 outline-none">
+                <option value="all">Todos los Eventos</option>
+                <option value="CONNECTED">🟢 Conexión Exitosa</option>
+                <option value="DISCONNECTED">🔴 Desconexión / Caída</option>
+                <option value="RECONNECTING">🟡 Reintentando Conexión</option>
+                <option value="ERROR">⚠️ Error de Apertura</option>
+                <option value="DISABLED">⚪ Pausada por Operador</option>
+                <option value="ENABLED">🔵 Reactivada por Operador</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">Fecha de Registro:</label>
+              <input type="date" id="filter-cam-log-date" onchange="loadCameraConnectionLogs(0); loadCameraConnectionStats();" class="w-full bg-brand-900 border border-brand-700 rounded px-2 py-1.5 text-slate-200 outline-none" />
+            </div>
+          </div>
+
+          <!-- Tabla de Registros de Conectividad -->
+          <div class="overflow-x-auto border border-brand-700/50 rounded-lg max-h-96 overflow-y-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead class="bg-brand-950 text-slate-400 sticky top-0 border-b border-brand-700/60 uppercase tracking-wider text-[11px]">
+                <tr>
+                  <th class="py-2.5 px-3 font-semibold">Fecha y Hora</th>
+                  <th class="py-2.5 px-3 font-semibold">Cámara</th>
+                  <th class="py-2.5 px-3 font-semibold">Evento</th>
+                  <th class="py-2.5 px-3 font-semibold">Estado</th>
+                  <th class="py-2.5 px-3 font-semibold">Duración</th>
+                  <th class="py-2.5 px-3 font-semibold">Fuente / Origen</th>
+                  <th class="py-2.5 px-3 font-semibold">Diagnóstico / Motivo Técnico</th>
+                </tr>
+              </thead>
+              <tbody id="camera-connection-logs-body" class="divide-y divide-brand-700/40 text-slate-300">
+                <tr>
+                  <td colspan="7" class="text-center py-6 text-slate-500">Cargando registros de conectividad...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Paginación de Conexiones -->
+          <div class="flex items-center justify-between text-xs text-slate-400 pt-1">
+            <span id="cam-logs-pagination-info">Mostrando 0 - 0 de 0</span>
+            <div class="flex gap-2">
+              <button id="btn-cam-logs-prev" onclick="prevCamLogsPage()" class="px-2.5 py-1 rounded bg-brand-950 hover:bg-brand-800 border border-brand-700 disabled:opacity-40" disabled>Anterior</button>
+              <button id="btn-cam-logs-next" onclick="nextCamLogsPage()" class="px-2.5 py-1 rounded bg-brand-950 hover:bg-brand-800 border border-brand-700 disabled:opacity-40" disabled>Siguiente</button>
+            </div>
           </div>
         </div>
 
@@ -1276,6 +1541,9 @@
     const eventsLimit = 50;
     let totalEvents = 0;
     let novastarPowerState = true;
+    let currentAnalyticsPanel = 'vehicle'; // 'vehicle' | 'pedestrian' | 'dual'
+    let analyticsInterval = null;
+    let eventsInterval = null;
 
     // Instancias de Chart.js
     let chartHourly = null;
@@ -1289,6 +1557,8 @@
       const el = document.getElementById('live-clock');
       if (el) el.textContent = timeStr;
     }, 1000);
+
+    let camLogsInterval = null;
 
     // ── NAVEGACIÓN POR PESTAÑAS ─────────────────────────────────────────────
     function switchTab(tab) {
@@ -1309,8 +1579,31 @@
         }
       });
 
+      // Limpiar intervalos de pestañas anteriores
+      if (tab !== 'campaigns' && typeof livePlaybackInterval !== 'undefined' && livePlaybackInterval) {
+        clearInterval(livePlaybackInterval);
+        livePlaybackInterval = null;
+      }
+      if (tab !== 'analytics' && analyticsInterval) {
+        clearInterval(analyticsInterval);
+        analyticsInterval = null;
+      }
+      if (tab !== 'events' && eventsInterval) {
+        clearInterval(eventsInterval);
+        eventsInterval = null;
+      }
+      if (tab !== 'settings' && camLogsInterval) {
+        clearInterval(camLogsInterval);
+        camLogsInterval = null;
+      }
+
       if (tab === 'analytics') {
         loadAnalyticsData();
+        if (!analyticsInterval) {
+          analyticsInterval = setInterval(() => {
+            if (currentTab === 'analytics') loadAnalyticsData();
+          }, 3000);
+        }
       } else if (tab === 'hardware') {
         refreshHardwareTelemetry();
       } else if (tab === 'campaigns') {
@@ -1325,10 +1618,25 @@
         }
       } else if (tab === 'events') {
         loadEvents(0);
+        if (!eventsInterval) {
+          eventsInterval = setInterval(() => {
+            if (currentTab === 'events' && eventsOffset === 0) loadEvents(0);
+          }, 4000);
+        }
       } else if (tab === 'settings') {
         scanDevices();
         loadDevicesSettings();
         loadHardwareDevices();
+        loadCameraConnectionStats();
+        loadCameraConnectionLogs(0);
+        if (!camLogsInterval) {
+          camLogsInterval = setInterval(() => {
+            if (currentTab === 'settings') {
+              loadCameraConnectionStats();
+              if (currentCamLogsOffset === 0) loadCameraConnectionLogs(0);
+            }
+          }, 5000);
+        }
       }
     }
 
@@ -2523,7 +2831,18 @@
       }
     }
 
-    // ── WEBSOCKET EN VIVO ───────────────────────────────────────────────────
+    // ── WEBSOCKET EN VIVO Y CARGA INICIAL DE TELEMETRÍA ─────────────────────
+    async function fetchInitialStats() {
+      try {
+        const res = await fetch('/api/stats');
+        const data = await res.json();
+        metrics = data.cameras || data || {};
+        updateLiveUI();
+      } catch (e) {
+        console.error("Error cargando estadísticas iniciales:", e);
+      }
+    }
+
     function connectWebSocket() {
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const url = `${proto}//${location.host}/ws/metrics`;
@@ -2532,12 +2851,22 @@
       ws.onopen = () => {
         document.getElementById('conn-dot').className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
         document.getElementById('conn-text').textContent = "Servicio Activo";
+        fetchInitialStats();
       };
 
       ws.onmessage = (evt) => {
         try {
           const data = JSON.parse(evt.data);
-          metrics = data;
+          if (data.type === 'camera_status_alert') {
+            const alertData = data.data || data;
+            showCameraAlertToast(alertData);
+            loadCameraConnectionStats();
+            if (currentTab === 'settings' && currentCamLogsOffset === 0) {
+              loadCameraConnectionLogs(0);
+            }
+            return;
+          }
+          metrics = data.cameras || data;
           updateLiveUI();
         } catch (e) {
           console.error("Error parseando métricas WS:", e);
@@ -2552,28 +2881,110 @@
     }
 
     function updateLiveUI() {
-      let totalIn = 0;
-      let totalOut = 0;
-      let activeTracks = 0;
+      const cams = (metrics && metrics.cameras) ? metrics.cameras : (metrics || {});
+      let totalVehSeen = 0, totalVehIn = 0, totalVehOut = 0, totalVehActive = 0;
+      let totalPedSeen = 0, totalPedIn = 0, totalPedOut = 0, totalPedActive = 0;
 
-      for (const camId in metrics) {
-        const m = metrics[camId];
-        totalIn += (m.total_in || 0);
-        totalOut += (m.total_out || 0);
-        activeTracks += (m.active_tracks || 0);
+      for (const camId in cams) {
+        if (camId === 'type' || camId === 'server_time' || camId === 'cameras' || camId === 'status') continue;
+        const m = cams[camId];
+        if (!m || typeof m !== 'object') continue;
+        const v = m.vehicles || { in: m.total_in || 0, out: m.total_out || 0, active: 0, flow: 0, seen: 0, crossing_rate: 0 };
+        const p = m.pedestrians || { in: 0, out: 0, active: 0, flow: 0, seen: 0, crossing_rate: 0 };
 
-        const inEl = document.getElementById(`cam-${camId}-in`);
-        const outEl = document.getElementById(`cam-${camId}-out`);
+        totalVehSeen += (v.seen || 0);
+        totalVehIn += (v.in || 0);
+        totalVehOut += (v.out || 0);
+        totalVehActive += (v.active || 0);
+
+        totalPedSeen += (p.seen || 0);
+        totalPedIn += (p.in || 0);
+        totalPedOut += (p.out || 0);
+        totalPedActive += (p.active || 0);
+
+        // Tarjetas por cámara: Métrica 1 (Vistos) y Métrica 2 (Cruces por Líneas)
+        const vSeenEl = document.getElementById(`cam-${camId}-veh-seen`);
+        const vActEl = document.getElementById(`cam-${camId}-veh-active`);
+        const vInEl = document.getElementById(`cam-${camId}-veh-in`);
+        const vOutEl = document.getElementById(`cam-${camId}-veh-out`);
+        const vFlowEl = document.getElementById(`cam-${camId}-veh-flow`);
+        const vRateEl = document.getElementById(`cam-${camId}-veh-rate`);
+        if (vSeenEl) vSeenEl.textContent = v.seen || 0;
+        if (vActEl) vActEl.textContent = v.active || 0;
+        if (vInEl) vInEl.textContent = v.in || 0;
+        if (vOutEl) vOutEl.textContent = v.out || 0;
+        if (vFlowEl) vFlowEl.textContent = (v.in || 0) + (v.out || 0);
+        if (vRateEl) vRateEl.textContent = (v.crossing_rate || 0) + '%';
+
+        const pSeenEl = document.getElementById(`cam-${camId}-ped-seen`);
+        const pActEl = document.getElementById(`cam-${camId}-ped-active`);
+        const pInEl = document.getElementById(`cam-${camId}-ped-in`);
+        const pOutEl = document.getElementById(`cam-${camId}-ped-out`);
+        const pFlowEl = document.getElementById(`cam-${camId}-ped-flow`);
+        const pRateEl = document.getElementById(`cam-${camId}-ped-rate`);
+        if (pSeenEl) pSeenEl.textContent = p.seen || 0;
+        if (pActEl) pActEl.textContent = p.active || 0;
+        if (pInEl) pInEl.textContent = p.in || 0;
+        if (pOutEl) pOutEl.textContent = p.out || 0;
+        if (pFlowEl) pFlowEl.textContent = (p.in || 0) + (p.out || 0);
+        if (pRateEl) pRateEl.textContent = (p.crossing_rate || 0) + '%';
+
         const fpsEl = document.getElementById(`cam-${camId}-fps`);
-        if (inEl) inEl.textContent = m.total_in || 0;
-        if (outEl) outEl.textContent = m.total_out || 0;
         if (fpsEl) fpsEl.textContent = (m.fps_processing || 0) + ' FPS';
+
+        // Desglose de conteo por línea virtual configurada
+        const linesContainer = document.getElementById(`cam-${camId}-lines-breakdown`);
+        if (linesContainer && m.lines && m.lines.length > 0) {
+          linesContainer.innerHTML = m.lines.map(l => {
+            const isVeh = l.target_entity === 'VEHICLE';
+            const isPed = l.target_entity === 'PEDESTRIAN';
+            const badgeClass = isVeh 
+              ? 'text-amber-300 border-amber-800/60 bg-amber-950/40' 
+              : (isPed ? 'text-purple-300 border-purple-800/60 bg-purple-950/40' : 'text-emerald-300 border-emerald-800/60 bg-emerald-950/40');
+            const icon = isVeh ? '🚗' : (isPed ? '🚶' : '⚡');
+            const inC = (l.in !== undefined ? l.in : (l.in_count || 0));
+            const outC = (l.out !== undefined ? l.out : (l.out_count || 0));
+            return `<div class="px-2 py-0.5 rounded border ${badgeClass} flex items-center gap-1.5 font-mono shadow-sm">
+              <span class="font-semibold">${icon} ${l.name}:</span>
+              <span class="text-emerald-400 font-bold" title="Entradas">↑${inC}</span>
+              <span class="text-amber-400 font-bold" title="Salidas">↓${outC}</span>
+            </div>`;
+          }).join('');
+        }
       }
 
-      document.getElementById('kpi-live-in').textContent = totalIn;
-      document.getElementById('kpi-live-out').textContent = totalOut;
-      document.getElementById('kpi-live-total').textContent = totalIn + totalOut;
-      document.getElementById('kpi-live-active').textContent = activeTracks;
+      // KPIs de la barra superior: Métrica 1 (Vistos) vs Métrica 2 (Cruces)
+      const elVehSeen = document.getElementById('kpi-live-veh-seen');
+      const elVehIn = document.getElementById('kpi-live-veh-in');
+      const elVehOut = document.getElementById('kpi-live-veh-out');
+      const elVehTot = document.getElementById('kpi-live-veh-total');
+      const elVehAct = document.getElementById('kpi-live-veh-active');
+      const elVehRate = document.getElementById('kpi-live-veh-rate');
+      if (elVehSeen) elVehSeen.textContent = totalVehSeen;
+      if (elVehIn) elVehIn.textContent = totalVehIn;
+      if (elVehOut) elVehOut.textContent = totalVehOut;
+      if (elVehTot) elVehTot.textContent = totalVehIn + totalVehOut;
+      if (elVehAct) elVehAct.textContent = totalVehActive;
+      if (elVehRate) {
+        const vRate = totalVehSeen > 0 ? Math.round(((totalVehIn + totalVehOut) / totalVehSeen) * 100) : 0;
+        elVehRate.textContent = `${vRate}%`;
+      }
+
+      const elPedSeen = document.getElementById('kpi-live-ped-seen');
+      const elPedIn = document.getElementById('kpi-live-ped-in');
+      const elPedOut = document.getElementById('kpi-live-ped-out');
+      const elPedTot = document.getElementById('kpi-live-ped-total');
+      const elPedAct = document.getElementById('kpi-live-ped-active');
+      const elPedRate = document.getElementById('kpi-live-ped-rate');
+      if (elPedSeen) elPedSeen.textContent = totalPedSeen;
+      if (elPedIn) elPedIn.textContent = totalPedIn;
+      if (elPedOut) elPedOut.textContent = totalPedOut;
+      if (elPedTot) elPedTot.textContent = totalPedIn + totalPedOut;
+      if (elPedAct) elPedAct.textContent = totalPedActive;
+      if (elPedRate) {
+        const pRate = totalPedSeen > 0 ? Math.round(((totalPedIn + totalPedOut) / totalPedSeen) * 100) : 0;
+        elPedRate.textContent = `${pRate}%`;
+      }
     }
 
     // ── GESTIÓN DE CÁMARAS Y LAYOUT ─────────────────────────────────────────
@@ -2647,7 +3058,7 @@
             <svg id="fline-svg-${camId}" class="absolute inset-0 w-full h-full pointer-events-none hidden z-20 cursor-crosshair"></svg>
 
             <!-- Barra flotante de control del editor de línea -->
-            <div id="fline-editor-${camId}" class="absolute top-2 left-1/2 -translate-x-1/2 hidden bg-brand-950/95 backdrop-blur-md px-3 py-1.5 rounded-xl flex items-center gap-2 z-30 border border-blue-500/50 shadow-2xl">
+            <div id="fline-editor-${camId}" class="absolute top-2 left-1/2 -translate-x-1/2 hidden bg-brand-950/95 backdrop-blur-md px-3 py-1.5 rounded-xl items-center gap-2 z-30 border border-blue-500/50 shadow-2xl flex-wrap max-w-[96%]">
               <div class="flex items-center gap-1.5 pr-2 border-r border-brand-700/70 text-[11px]">
                 <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-emerald-950"></span>
                 <span class="text-slate-200 font-semibold">In</span>
@@ -2655,12 +3066,40 @@
                 <span class="w-2.5 h-2.5 rounded-full bg-red-400 ring-2 ring-red-950"></span>
                 <span class="text-slate-200 font-semibold">Out</span>
               </div>
+
+              <!-- Selector de línea activa -->
+              <div class="flex items-center gap-1">
+                <label class="text-[10px] text-slate-400 font-bold">Línea:</label>
+                <select id="fline-select-${camId}" onchange="changeActiveLineInEditor('${camId}', this.value)" class="bg-brand-900 border border-brand-700 text-xs text-white rounded px-1.5 py-1 font-semibold focus:outline-none focus:border-blue-500">
+                </select>
+                <button onclick="addNewLineToEditor('${camId}')" class="px-2 py-1 rounded bg-emerald-700/80 hover:bg-emerald-600 text-xs text-emerald-100 flex items-center gap-1 font-medium transition shadow-sm" title="Añadir nueva línea delimitadora">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                  <span>+ Nueva</span>
+                </button>
+              </div>
+
+              <!-- Propiedades de la línea activa -->
+              <div class="flex items-center gap-1 pl-1 border-l border-brand-800/80">
+                <input id="fline-name-${camId}" oninput="updateActiveLineName('${camId}', this.value)" type="text" class="w-24 px-2 py-0.5 bg-brand-900 border border-brand-700 text-xs text-white rounded focus:outline-none focus:border-blue-500" placeholder="Nombre" title="Nombre descriptivo de la línea" />
+                <select id="fline-entity-${camId}" onchange="updateActiveLineEntity('${camId}', this.value)" class="bg-brand-900 text-xs text-white border border-brand-700 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-500">
+                  <option value="ALL">⚡ Todos</option>
+                  <option value="VEHICLE">🚗 Solo Vehículos</option>
+                  <option value="PEDESTRIAN">🚶 Solo Personas</option>
+                </select>
+              </div>
+
               <span id="fline-coords-${camId}" class="font-mono text-[10px] text-blue-300 px-1.5 py-0.5 bg-blue-950/70 rounded border border-blue-800/40 whitespace-nowrap"></span>
-              <button onclick="swapLineOrientation('${camId}')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 flex items-center gap-1 font-medium transition" title="Invertir dirección Entrada/Salida">
+              
+              <button onclick="swapLineOrientation('${camId}')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 flex items-center gap-1 font-medium transition" title="Invertir dirección Entrada/Salida de la línea activa">
                 <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
                 <span>Invertir</span>
               </button>
-              <button onclick="saveLine('${camId}')" class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white flex items-center gap-1 transition shadow-sm" title="Guardar cambios">
+
+              <button onclick="deleteLineInEditor('${camId}')" id="fline-del-${camId}" class="px-2 py-1 rounded bg-red-950/80 hover:bg-red-900 border border-red-800/60 text-xs text-red-300 transition" title="Eliminar línea activa">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </button>
+
+              <button onclick="saveLine('${camId}')" class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white flex items-center gap-1 transition shadow-sm ml-1" title="Guardar configuración de líneas">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                 <span>Guardar</span>
               </button>
@@ -2681,23 +3120,75 @@
               </div>
             ` : ''}
           </div>
-          <div class="px-4 py-2.5 bg-brand-900 border-t border-brand-700/50 grid grid-cols-2 gap-2 text-center text-xs">
-            <div class="p-1.5 rounded bg-emerald-950/40 border border-emerald-800/40">
-              <span class="text-[10px] uppercase text-emerald-400 font-semibold block">Entradas</span>
-              <span class="text-base font-extrabold text-emerald-300" id="cam-${camId}-in">0</span>
+          <div class="px-3 py-2 bg-brand-900 border-t border-brand-700/50 grid grid-cols-2 gap-2 text-center text-xs">
+            <!-- Bloque Vehicular (Métrica 1: Vistos vs Métrica 2: Cruce de Líneas) -->
+            <div class="p-1.5 rounded bg-blue-950/40 border border-blue-800/50 flex flex-col justify-between gap-1">
+              <div class="flex items-center justify-between text-[10px] text-blue-300 font-bold border-b border-blue-900/50 pb-0.5">
+                <span class="flex items-center gap-1">🚗 VEHÍCULOS</span>
+                <span class="text-[9px] font-mono text-blue-400" title="Tasa de cruce sobre vistos">Cruce: <strong id="cam-${camId}-veh-rate" class="text-white font-bold">0%</strong></span>
+              </div>
+              <!-- Métrica 1: Vistos en campo de visión -->
+              <div class="bg-brand-950/70 rounded py-0.5 px-1.5 border border-brand-800/60 flex items-center justify-between text-[10px] font-mono">
+                <span class="text-slate-400">👁️ VISTOS:</span>
+                <span class="font-extrabold text-blue-300" id="cam-${camId}-veh-seen" title="Total de vehículos detectados">0</span>
+                <span class="text-[9px] text-slate-500">| Act:<strong id="cam-${camId}-veh-active" class="text-slate-300 ml-0.5">0</strong></span>
+              </div>
+              <!-- Métrica 2: Cruce por líneas delimitadoras -->
+              <div class="grid grid-cols-2 gap-1 text-[11px]">
+                <div class="bg-brand-950/60 rounded py-0.5 border border-brand-800/50">
+                  <span class="text-[9px] text-emerald-400 font-semibold block">↑ IN</span>
+                  <span class="font-extrabold text-emerald-300" id="cam-${camId}-veh-in">0</span>
+                </div>
+                <div class="bg-brand-950/60 rounded py-0.5 border border-brand-800/50">
+                  <span class="text-[9px] text-amber-400 font-semibold block">↓ OUT</span>
+                  <span class="font-extrabold text-amber-300" id="cam-${camId}-veh-out">0</span>
+                </div>
+              </div>
+              <div class="text-[9px] text-slate-400 flex justify-between px-0.5">
+                <span>Total Cruzaron:</span>
+                <strong id="cam-${camId}-veh-flow" class="text-white font-mono">0</strong>
+              </div>
             </div>
-            <div class="p-1.5 rounded bg-amber-950/40 border border-amber-800/40">
-              <span class="text-[10px] uppercase text-amber-400 font-semibold block">Salidas</span>
-              <span class="text-base font-extrabold text-amber-300" id="cam-${camId}-out">0</span>
+
+            <!-- Bloque Peatonal (Métrica 1: Vistas vs Métrica 2: Cruce de Líneas) -->
+            <div class="p-1.5 rounded bg-purple-950/40 border border-purple-800/50 flex flex-col justify-between gap-1">
+              <div class="flex items-center justify-between text-[10px] text-purple-300 font-bold border-b border-purple-900/50 pb-0.5">
+                <span class="flex items-center gap-1">🚶 PERSONAS</span>
+                <span class="text-[9px] font-mono text-purple-400" title="Tasa de cruce sobre vistos">Cruce: <strong id="cam-${camId}-ped-rate" class="text-white font-bold">0%</strong></span>
+              </div>
+              <!-- Métrica 1: Vistos en campo de visión -->
+              <div class="bg-brand-950/70 rounded py-0.5 px-1.5 border border-brand-800/60 flex items-center justify-between text-[10px] font-mono">
+                <span class="text-slate-400">👁️ VISTAS:</span>
+                <span class="font-extrabold text-purple-300" id="cam-${camId}-ped-seen" title="Total de personas detectadas">0</span>
+                <span class="text-[9px] text-slate-500">| Act:<strong id="cam-${camId}-ped-active" class="text-slate-300 ml-0.5">0</strong></span>
+              </div>
+              <!-- Métrica 2: Cruce por líneas delimitadoras -->
+              <div class="grid grid-cols-2 gap-1 text-[11px]">
+                <div class="bg-brand-950/60 rounded py-0.5 border border-brand-800/50">
+                  <span class="text-[9px] text-emerald-400 font-semibold block">↑ IN</span>
+                  <span class="font-extrabold text-emerald-300" id="cam-${camId}-ped-in">0</span>
+                </div>
+                <div class="bg-brand-950/60 rounded py-0.5 border border-brand-800/50">
+                  <span class="text-[9px] text-amber-400 font-semibold block">↓ OUT</span>
+                  <span class="font-extrabold text-amber-300" id="cam-${camId}-ped-out">0</span>
+                </div>
+              </div>
+              <div class="text-[9px] text-slate-400 flex justify-between px-0.5">
+                <span>Total Cruzaron:</span>
+                <strong id="cam-${camId}-ped-flow" class="text-white font-mono">0</strong>
+              </div>
             </div>
+
+            <!-- Desglose por Líneas de Aforo Configuradas -->
+            <div id="cam-${camId}-lines-breakdown" class="col-span-2 pt-1 border-t border-brand-800/40 flex flex-wrap gap-1.5 items-center justify-center text-[10px]"></div>
           </div>
         `;
         grid.appendChild(card);
       }
     }
 
-    // ─── EDITOR INTERACTIVO DE LÍNEAS DE CRUCE ──────────────────────────────
-    const lineEditors = {}; // camId -> { start, end, dragging, updateDraw, cleanup }
+    // ─── EDITOR INTERACTIVO MULTI-LÍNEA DE CRUCE ───────────────────────────
+    const lineEditors = {}; // camId -> { lines: [...], activeIdx: 0, dragging: null, updateDraw: fn, cleanup: fn }
 
     function editLineFromDevices(camId) {
       switchTab('live');
@@ -2710,9 +3201,12 @@
 
     async function editLine(camId) {
       try {
-        const res = await fetch(`/api/line/${camId}`);
-        if (!res.ok) throw new Error("No se pudo obtener la configuración de la línea.");
+        const res = await fetch(`/api/lines/${camId}`);
+        if (!res.ok) throw new Error("No se pudo obtener la configuración de las líneas.");
         const data = await res.json();
+        const rawLines = data.lines && data.lines.length > 0 ? data.lines : [
+          { id: 'line_1', name: 'Línea Principal', target_entity: 'ALL', coords: [[200, 360], [1080, 360]] }
+        ];
 
         const svg = document.getElementById(`fline-svg-${camId}`);
         const bar = document.getElementById(`fline-editor-${camId}`);
@@ -2723,14 +3217,14 @@
         bar.classList.remove('hidden');
         bar.classList.add('flex');
 
-        initLineEditor(camId, data.line.start, data.line.end);
+        initLineEditor(camId, rawLines);
       } catch (err) {
-        alert("Error al cargar la línea para edición: " + err.message);
+        alert("Error al cargar las líneas para edición: " + err.message);
         console.error(err);
       }
     }
 
-    function initLineEditor(camId, startCoords, endCoords) {
+    function initLineEditor(camId, linesList) {
       const svg = document.getElementById(`fline-svg-${camId}`);
       if (!svg) return;
       svg.innerHTML = '';
@@ -2742,117 +3236,52 @@
       const NATIVE_W = 1280;
       const NATIVE_H = 720;
 
+      // Clonar líneas para no mutar estado hasta guardar
+      const clonedLines = linesList.map((l, i) => ({
+        id: l.id || `line_${i + 1}`,
+        name: l.name || `Línea ${i + 1}`,
+        target_entity: (l.target_entity || 'ALL').toUpperCase(),
+        coords: [
+          [Number(l.coords[0][0]), Number(l.coords[0][1])],
+          [Number(l.coords[1][0]), Number(l.coords[1][1])]
+        ]
+      }));
+
       lineEditors[camId] = {
-        start: [Number(startCoords[0]), Number(startCoords[1])],
-        end: [Number(endCoords[0]), Number(endCoords[1])],
-        dragging: null,
-        cleanup: null
+        lines: clonedLines,
+        activeIdx: 0,
+        dragging: null, // 'start' or 'end'
+        cleanup: null,
+        updateDraw: null
       };
 
       const state = lineEditors[camId];
       const svgNS = "http://www.w3.org/2000/svg";
 
-      // 1. Línea sombra de contraste
-      const shadowLine = document.createElementNS(svgNS, "line");
-      shadowLine.setAttribute("stroke", "#000000");
-      shadowLine.setAttribute("stroke-width", "6");
-      shadowLine.setAttribute("stroke-opacity", "0.6");
-      svg.appendChild(shadowLine);
+      const refreshEditorControls = () => {
+        const select = document.getElementById(`fline-select-${camId}`);
+        const nameInput = document.getElementById(`fline-name-${camId}`);
+        const entitySelect = document.getElementById(`fline-entity-${camId}`);
+        const delBtn = document.getElementById(`fline-del-${camId}`);
 
-      // 2. Línea guía principal con guiones
-      const mainLine = document.createElementNS(svgNS, "line");
-      mainLine.setAttribute("stroke", "#f59e0b");
-      mainLine.setAttribute("stroke-width", "3.5");
-      mainLine.setAttribute("stroke-dasharray", "8 6");
-      svg.appendChild(mainLine);
+        if (select) {
+          select.innerHTML = state.lines.map((l, idx) => {
+            const icon = l.target_entity === 'VEHICLE' ? '🚗' : (l.target_entity === 'PEDESTRIAN' ? '🚶' : '⚡');
+            return `<option value="${idx}" ${idx === state.activeIdx ? 'selected' : ''}>${icon} ${l.name}</option>`;
+          }).join('');
+        }
 
-      // 3. Handle Entrada (IN - Verde)
-      const startG = document.createElementNS(svgNS, "g");
-      startG.setAttribute("class", "cursor-grab active:cursor-grabbing");
-      
-      const startHalo = document.createElementNS(svgNS, "circle");
-      startHalo.setAttribute("r", "20");
-      startHalo.setAttribute("fill", "#10b981");
-      startHalo.setAttribute("fill-opacity", "0.35");
+        const activeLine = state.lines[state.activeIdx];
+        if (activeLine) {
+          if (nameInput) nameInput.value = activeLine.name;
+          if (entitySelect) entitySelect.value = activeLine.target_entity;
+        }
 
-      const startCircle = document.createElementNS(svgNS, "circle");
-      startCircle.setAttribute("r", "13");
-      startCircle.setAttribute("fill", "#10b981");
-      startCircle.setAttribute("stroke", "#ffffff");
-      startCircle.setAttribute("stroke-width", "2.5");
-
-      const startText = document.createElementNS(svgNS, "text");
-      startText.textContent = "IN";
-      startText.setAttribute("text-anchor", "middle");
-      startText.setAttribute("dominant-baseline", "central");
-      startText.setAttribute("fill", "#ffffff");
-      startText.setAttribute("font-size", "10");
-      startText.setAttribute("font-weight", "bold");
-      startText.setAttribute("pointer-events", "none");
-
-      startG.appendChild(startHalo);
-      startG.appendChild(startCircle);
-      startG.appendChild(startText);
-      svg.appendChild(startG);
-
-      // 4. Handle Salida (OUT - Rojo)
-      const endG = document.createElementNS(svgNS, "g");
-      endG.setAttribute("class", "cursor-grab active:cursor-grabbing");
-
-      const endHalo = document.createElementNS(svgNS, "circle");
-      endHalo.setAttribute("r", "20");
-      endHalo.setAttribute("fill", "#ef4444");
-      endHalo.setAttribute("fill-opacity", "0.35");
-
-      const endCircle = document.createElementNS(svgNS, "circle");
-      endCircle.setAttribute("r", "13");
-      endCircle.setAttribute("fill", "#ef4444");
-      endCircle.setAttribute("stroke", "#ffffff");
-      endCircle.setAttribute("stroke-width", "2.5");
-
-      const endText = document.createElementNS(svgNS, "text");
-      endText.textContent = "OUT";
-      endText.setAttribute("text-anchor", "middle");
-      endText.setAttribute("dominant-baseline", "central");
-      endText.setAttribute("fill", "#ffffff");
-      endText.setAttribute("font-size", "9");
-      endText.setAttribute("font-weight", "bold");
-      endText.setAttribute("pointer-events", "none");
-
-      endG.appendChild(endHalo);
-      endG.appendChild(endCircle);
-      endG.appendChild(endText);
-      svg.appendChild(endG);
-
-      // Proyección nativa -> pixeles SVG en pantalla
-      const updateDraw = () => {
-        const rect = svg.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return;
-
-        const scaleX = rect.width / NATIVE_W;
-        const scaleY = rect.height / NATIVE_H;
-
-        const sx = state.start[0] * scaleX;
-        const sy = state.start[1] * scaleY;
-        const ex = state.end[0] * scaleX;
-        const ey = state.end[1] * scaleY;
-
-        shadowLine.setAttribute("x1", sx); shadowLine.setAttribute("y1", sy);
-        shadowLine.setAttribute("x2", ex); shadowLine.setAttribute("y2", ey);
-
-        mainLine.setAttribute("x1", sx); mainLine.setAttribute("y1", sy);
-        mainLine.setAttribute("x2", ex); mainLine.setAttribute("y2", ey);
-
-        startG.setAttribute("transform", `translate(${sx}, ${sy})`);
-        endG.setAttribute("transform", `translate(${ex}, ${ey})`);
-
-        const coordsBadge = document.getElementById(`fline-coords-${camId}`);
-        if (coordsBadge) {
-          coordsBadge.textContent = `(${state.start[0]}, ${state.start[1]}) → (${state.end[0]}, ${state.end[1]})`;
+        if (delBtn) {
+          delBtn.disabled = state.lines.length <= 1;
+          delBtn.style.opacity = state.lines.length <= 1 ? '0.4' : '1';
         }
       };
-
-      state.updateDraw = updateDraw;
 
       const getPointFromClient = (clientX, clientY) => {
         const rect = svg.getBoundingClientRect();
@@ -2864,32 +3293,238 @@
         ];
       };
 
-      // Mouse drag
-      startG.onmousedown = (e) => { state.dragging = 'start'; e.stopPropagation(); e.preventDefault(); };
-      endG.onmousedown = (e) => { state.dragging = 'end'; e.stopPropagation(); e.preventDefault(); };
+      const getEntityColor = (entity) => {
+        if (entity === 'VEHICLE') return '#f59e0b'; // Amber
+        if (entity === 'PEDESTRIAN') return '#a855f7'; // Purple
+        return '#10b981'; // Emerald
+      };
+
+      const updateDraw = () => {
+        svg.innerHTML = '';
+        const rect = svg.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+
+        const scaleX = rect.width / NATIVE_W;
+        const scaleY = rect.height / NATIVE_H;
+
+        state.lines.forEach((line, idx) => {
+          const isActive = idx === state.activeIdx;
+          const color = getEntityColor(line.target_entity);
+
+          const sx = line.coords[0][0] * scaleX;
+          const sy = line.coords[0][1] * scaleY;
+          const ex = line.coords[1][0] * scaleX;
+          const ey = line.coords[1][1] * scaleY;
+
+          const mx = (sx + ex) / 2;
+          const my = (sy + ey) / 2;
+
+          if (isActive) {
+            // Sombra gruesa de alto contraste
+            const shadowLine = document.createElementNS(svgNS, "line");
+            shadowLine.setAttribute("x1", sx); shadowLine.setAttribute("y1", sy);
+            shadowLine.setAttribute("x2", ex); shadowLine.setAttribute("y2", ey);
+            shadowLine.setAttribute("stroke", "#000000");
+            shadowLine.setAttribute("stroke-width", "7");
+            shadowLine.setAttribute("stroke-opacity", "0.7");
+            svg.appendChild(shadowLine);
+
+            // Línea principal activa
+            const mainLine = document.createElementNS(svgNS, "line");
+            mainLine.setAttribute("x1", sx); mainLine.setAttribute("y1", sy);
+            mainLine.setAttribute("x2", ex); mainLine.setAttribute("y2", ey);
+            mainLine.setAttribute("stroke", color);
+            mainLine.setAttribute("stroke-width", "4");
+            mainLine.setAttribute("stroke-dasharray", "8 6");
+            svg.appendChild(mainLine);
+
+            // Badge central de la línea activa
+            const badgeG = document.createElementNS(svgNS, "g");
+            badgeG.setAttribute("transform", `translate(${mx}, ${my})`);
+
+            const badgeRect = document.createElementNS(svgNS, "rect");
+            badgeRect.setAttribute("x", "-55");
+            badgeRect.setAttribute("y", "-13");
+            badgeRect.setAttribute("width", "110");
+            badgeRect.setAttribute("height", "26");
+            badgeRect.setAttribute("rx", "6");
+            badgeRect.setAttribute("fill", "#090d16");
+            badgeRect.setAttribute("fill-opacity", "0.92");
+            badgeRect.setAttribute("stroke", color);
+            badgeRect.setAttribute("stroke-width", "2");
+
+            const badgeText = document.createElementNS(svgNS, "text");
+            badgeText.textContent = `${line.name} ★`;
+            badgeText.setAttribute("text-anchor", "middle");
+            badgeText.setAttribute("dominant-baseline", "central");
+            badgeText.setAttribute("fill", "#ffffff");
+            badgeText.setAttribute("font-size", "11");
+            badgeText.setAttribute("font-weight", "bold");
+            badgeText.setAttribute("pointer-events", "none");
+
+            badgeG.appendChild(badgeRect);
+            badgeG.appendChild(badgeText);
+            svg.appendChild(badgeG);
+
+            // Handle Entrada (IN - Verde)
+            const startG = document.createElementNS(svgNS, "g");
+            startG.setAttribute("class", "cursor-grab active:cursor-grabbing pointer-events-auto");
+            startG.setAttribute("transform", `translate(${sx}, ${sy})`);
+
+            const startHalo = document.createElementNS(svgNS, "circle");
+            startHalo.setAttribute("r", "20");
+            startHalo.setAttribute("fill", "#10b981");
+            startHalo.setAttribute("fill-opacity", "0.35");
+
+            const startCircle = document.createElementNS(svgNS, "circle");
+            startCircle.setAttribute("r", "13");
+            startCircle.setAttribute("fill", "#10b981");
+            startCircle.setAttribute("stroke", "#ffffff");
+            startCircle.setAttribute("stroke-width", "2.5");
+
+            const startText = document.createElementNS(svgNS, "text");
+            startText.textContent = "IN";
+            startText.setAttribute("text-anchor", "middle");
+            startText.setAttribute("dominant-baseline", "central");
+            startText.setAttribute("fill", "#ffffff");
+            startText.setAttribute("font-size", "10");
+            startText.setAttribute("font-weight", "bold");
+            startText.setAttribute("pointer-events", "none");
+
+            startG.appendChild(startHalo);
+            startG.appendChild(startCircle);
+            startG.appendChild(startText);
+
+            // Handle Salida (OUT - Rojo)
+            const endG = document.createElementNS(svgNS, "g");
+            endG.setAttribute("class", "cursor-grab active:cursor-grabbing pointer-events-auto");
+            endG.setAttribute("transform", `translate(${ex}, ${ey})`);
+
+            const endHalo = document.createElementNS(svgNS, "circle");
+            endHalo.setAttribute("r", "20");
+            endHalo.setAttribute("fill", "#ef4444");
+            endHalo.setAttribute("fill-opacity", "0.35");
+
+            const endCircle = document.createElementNS(svgNS, "circle");
+            endCircle.setAttribute("r", "13");
+            endCircle.setAttribute("fill", "#ef4444");
+            endCircle.setAttribute("stroke", "#ffffff");
+            endCircle.setAttribute("stroke-width", "2.5");
+
+            const endText = document.createElementNS(svgNS, "text");
+            endText.textContent = "OUT";
+            endText.setAttribute("text-anchor", "middle");
+            endText.setAttribute("dominant-baseline", "central");
+            endText.setAttribute("fill", "#ffffff");
+            endText.setAttribute("font-size", "9");
+            endText.setAttribute("font-weight", "bold");
+            endText.setAttribute("pointer-events", "none");
+
+            endG.appendChild(endHalo);
+            endG.appendChild(endCircle);
+            endG.appendChild(endText);
+
+            startG.onmousedown = (e) => { state.dragging = 'start'; e.stopPropagation(); e.preventDefault(); };
+            endG.onmousedown = (e) => { state.dragging = 'end'; e.stopPropagation(); e.preventDefault(); };
+            startG.ontouchstart = (e) => { state.dragging = 'start'; e.stopPropagation(); e.preventDefault(); };
+            endG.ontouchstart = (e) => { state.dragging = 'end'; e.stopPropagation(); e.preventDefault(); };
+
+            svg.appendChild(startG);
+            svg.appendChild(endG);
+
+            const coordsBadge = document.getElementById(`fline-coords-${camId}`);
+            if (coordsBadge) {
+              coordsBadge.textContent = `(${line.coords[0][0]}, ${line.coords[0][1]}) → (${line.coords[1][0]}, ${line.coords[1][1]})`;
+            }
+          } else {
+            // Línea inactiva (clicable para cambiar foco)
+            const hitLine = document.createElementNS(svgNS, "line");
+            hitLine.setAttribute("x1", sx); hitLine.setAttribute("y1", sy);
+            hitLine.setAttribute("x2", ex); hitLine.setAttribute("y2", ey);
+            hitLine.setAttribute("stroke", "transparent");
+            hitLine.setAttribute("stroke-width", "24");
+            hitLine.setAttribute("class", "cursor-pointer pointer-events-auto");
+            hitLine.onclick = () => { changeActiveLineInEditor(camId, idx); };
+            svg.appendChild(hitLine);
+
+            const inactLine = document.createElementNS(svgNS, "line");
+            inactLine.setAttribute("x1", sx); inactLine.setAttribute("y1", sy);
+            inactLine.setAttribute("x2", ex); inactLine.setAttribute("y2", ey);
+            inactLine.setAttribute("stroke", color);
+            inactLine.setAttribute("stroke-width", "2.5");
+            inactLine.setAttribute("stroke-dasharray", "5 4");
+            inactLine.setAttribute("stroke-opacity", "0.65");
+            inactLine.setAttribute("class", "cursor-pointer pointer-events-auto");
+            inactLine.onclick = () => { changeActiveLineInEditor(camId, idx); };
+            svg.appendChild(inactLine);
+
+            // Badge central inactivo (clicable)
+            const bG = document.createElementNS(svgNS, "g");
+            bG.setAttribute("transform", `translate(${mx}, ${my})`);
+            bG.setAttribute("class", "cursor-pointer pointer-events-auto");
+            bG.onclick = () => { changeActiveLineInEditor(camId, idx); };
+
+            const bRect = document.createElementNS(svgNS, "rect");
+            bRect.setAttribute("x", "-45");
+            bRect.setAttribute("y", "-10");
+            bRect.setAttribute("width", "90");
+            bRect.setAttribute("height", "20");
+            bRect.setAttribute("rx", "4");
+            bRect.setAttribute("fill", "#090d16");
+            bRect.setAttribute("fill-opacity", "0.8");
+            bRect.setAttribute("stroke", color);
+            bRect.setAttribute("stroke-opacity", "0.6");
+            bRect.setAttribute("stroke-width", "1");
+
+            const bText = document.createElementNS(svgNS, "text");
+            bText.textContent = line.name;
+            bText.setAttribute("text-anchor", "middle");
+            bText.setAttribute("dominant-baseline", "central");
+            bText.setAttribute("fill", "#cbd5e1");
+            bText.setAttribute("font-size", "10");
+            bText.setAttribute("pointer-events", "none");
+
+            bG.appendChild(bRect);
+            bG.appendChild(bText);
+            svg.appendChild(bG);
+          }
+        });
+      };
+
+      state.updateDraw = updateDraw;
+      state.refreshEditorControls = refreshEditorControls;
 
       const onMouseMove = (e) => {
         if (!state.dragging) return;
-        state[state.dragging] = getPointFromClient(e.clientX, e.clientY);
+        const activeLine = state.lines[state.activeIdx];
+        if (!activeLine) return;
+        const pt = getPointFromClient(e.clientX, e.clientY);
+        if (state.dragging === 'start') {
+          activeLine.coords[0] = pt;
+        } else if (state.dragging === 'end') {
+          activeLine.coords[1] = pt;
+        }
         updateDraw();
       };
       const onMouseUp = () => { state.dragging = null; };
 
-      window.addEventListener('mousemove', onMouseMove);
-      window.addEventListener('mouseup', onMouseUp);
-
-      // Touch drag
-      startG.ontouchstart = (e) => { state.dragging = 'start'; e.stopPropagation(); e.preventDefault(); };
-      endG.ontouchstart = (e) => { state.dragging = 'end'; e.stopPropagation(); e.preventDefault(); };
-
       const onTouchMove = (e) => {
         if (!state.dragging || !e.touches[0]) return;
-        state[state.dragging] = getPointFromClient(e.touches[0].clientX, e.touches[0].clientY);
+        const activeLine = state.lines[state.activeIdx];
+        if (!activeLine) return;
+        const pt = getPointFromClient(e.touches[0].clientX, e.touches[0].clientY);
+        if (state.dragging === 'start') {
+          activeLine.coords[0] = pt;
+        } else if (state.dragging === 'end') {
+          activeLine.coords[1] = pt;
+        }
         updateDraw();
         e.preventDefault();
       };
       const onTouchEnd = () => { state.dragging = null; };
 
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
       window.addEventListener('touchmove', onTouchMove, { passive: false });
       window.addEventListener('touchend', onTouchEnd);
       window.addEventListener('resize', updateDraw);
@@ -2902,15 +3537,90 @@
         window.removeEventListener('resize', updateDraw);
       };
 
+      refreshEditorControls();
       updateDraw();
+    }
+
+    function changeActiveLineInEditor(camId, idx) {
+      const state = lineEditors[camId];
+      if (!state) return;
+      state.activeIdx = Number(idx);
+      if (state.refreshEditorControls) state.refreshEditorControls();
+      if (state.updateDraw) state.updateDraw();
+    }
+
+    function addNewLineToEditor(camId) {
+      const state = lineEditors[camId];
+      if (!state) return;
+      const newIdx = state.lines.length + 1;
+      const offset = (state.lines.length * 60) % 240;
+      const newLine = {
+        id: `line_${Date.now()}`,
+        name: `Línea ${newIdx}`,
+        target_entity: 'ALL',
+        coords: [
+          [220, 260 + offset],
+          [1060, 260 + offset]
+        ]
+      };
+      state.lines.push(newLine);
+      state.activeIdx = state.lines.length - 1;
+      if (state.refreshEditorControls) state.refreshEditorControls();
+      if (state.updateDraw) state.updateDraw();
+    }
+
+    function updateActiveLineName(camId, newName) {
+      const state = lineEditors[camId];
+      if (!state) return;
+      const activeLine = state.lines[state.activeIdx];
+      if (activeLine) {
+        activeLine.name = newName || `Línea ${state.activeIdx + 1}`;
+        const select = document.getElementById(`fline-select-${camId}`);
+        if (select && select.options[state.activeIdx]) {
+          const icon = activeLine.target_entity === 'VEHICLE' ? '🚗' : (activeLine.target_entity === 'PEDESTRIAN' ? '🚶' : '⚡');
+          select.options[state.activeIdx].text = `${icon} ${activeLine.name}`;
+        }
+        if (state.updateDraw) state.updateDraw();
+      }
+    }
+
+    function updateActiveLineEntity(camId, newEntity) {
+      const state = lineEditors[camId];
+      if (!state) return;
+      const activeLine = state.lines[state.activeIdx];
+      if (activeLine) {
+        activeLine.target_entity = (newEntity || 'ALL').toUpperCase();
+        const select = document.getElementById(`fline-select-${camId}`);
+        if (select && select.options[state.activeIdx]) {
+          const icon = activeLine.target_entity === 'VEHICLE' ? '🚗' : (activeLine.target_entity === 'PEDESTRIAN' ? '🚶' : '⚡');
+          select.options[state.activeIdx].text = `${icon} ${activeLine.name}`;
+        }
+        if (state.updateDraw) state.updateDraw();
+      }
+    }
+
+    function deleteLineInEditor(camId) {
+      const state = lineEditors[camId];
+      if (!state || state.lines.length <= 1) {
+        alert("Debe mantenerse al menos una línea de conteo para la cámara.");
+        return;
+      }
+      if (!confirm(`¿Eliminar la "${state.lines[state.activeIdx].name}"?`)) return;
+
+      state.lines.splice(state.activeIdx, 1);
+      state.activeIdx = Math.max(0, state.activeIdx - 1);
+      if (state.refreshEditorControls) state.refreshEditorControls();
+      if (state.updateDraw) state.updateDraw();
     }
 
     function swapLineOrientation(camId) {
       const state = lineEditors[camId];
       if (!state) return;
-      const tmp = state.start;
-      state.start = state.end;
-      state.end = tmp;
+      const activeLine = state.lines[state.activeIdx];
+      if (!activeLine) return;
+      const tmp = activeLine.coords[0];
+      activeLine.coords[0] = activeLine.coords[1];
+      activeLine.coords[1] = tmp;
       if (state.updateDraw) state.updateDraw();
     }
 
@@ -2937,10 +3647,10 @@
       if (!state) return;
 
       try {
-        const res = await fetch(`/api/line/${camId}`, {
+        const res = await fetch(`/api/lines/${camId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ start: state.start, end: state.end })
+          body: JSON.stringify({ lines: state.lines })
         });
         if (!res.ok) throw new Error("Error al comunicarse con el servidor.");
         
@@ -2949,7 +3659,7 @@
           loadDevicesSettings();
         }
       } catch (err) {
-        alert("Error al guardar la línea: " + err.message);
+        alert("Error al guardar las líneas: " + err.message);
         console.error(err);
       }
     }
@@ -2992,17 +3702,17 @@
           return;
         }
 
-        // Consultar coordenadas actuales de cada línea configurada
+        // Consultar líneas actuales de cada cámara configurada
         const linesRes = await Promise.all(
           Object.keys(confCams).map(async cid => {
             try {
-              const r = await fetch(`/api/line/${cid}`);
+              const r = await fetch(`/api/lines/${cid}`);
               if (r.ok) {
                 const ld = await r.json();
-                return { [cid]: ld.line };
+                return { [cid]: ld.lines };
               }
             } catch(e) {}
-            return { [cid]: null };
+            return { [cid]: [] };
           })
         );
         const linesMap = Object.assign({}, ...linesRes);
@@ -3010,8 +3720,10 @@
         container.innerHTML = Object.keys(confCams).map(cid => {
           const cam = confCams[cid];
           const isEnabled = cam.enabled !== false;
-          const line = linesMap[cid];
-          const lineText = line ? `P1: (${line.start[0]}, ${line.start[1]}) → P2: (${line.end[0]}, ${line.end[1]})` : 'No configurada';
+          const camLines = linesMap[cid] || [];
+          const lineText = camLines.length > 0
+            ? `${camLines.length} línea(s): ` + camLines.map(l => `${l.name} (${l.target_entity === 'ALL' ? 'Todos' : (l.target_entity === 'VEHICLE' ? 'Vehículos' : 'Peatones')})`).join(', ')
+            : 'No configurada';
 
           return `
             <div class="p-3.5 bg-brand-950 border border-brand-700/60 rounded-xl flex items-center justify-between">
@@ -3081,7 +3793,11 @@
     }
 
     function populateCameraSelects() {
-      const selects = [document.getElementById('filter-analytics-cam'), document.getElementById('filter-ev-cam')];
+      const selects = [
+        document.getElementById('filter-analytics-cam'), 
+        document.getElementById('filter-ev-cam'),
+        document.getElementById('filter-cam-log-id')
+      ];
       selects.forEach(sel => {
         if (!sel) return;
         const curr = sel.value;
@@ -3096,7 +3812,288 @@
       });
     }
 
-    // ── ANALÍTICA HISTÓRICA (CHART.JS) ──────────────────────────────────────
+    // ── BITÁCORA DE CONECTIVIDAD DE CÁMARAS (UPTIME & CAÍDAS) ───────────────
+    let currentCamLogsOffset = 0;
+    const CAM_LOGS_LIMIT = 20;
+
+    async function loadCameraConnectionStats() {
+      try {
+        const cid = document.getElementById('filter-cam-log-id') ? document.getElementById('filter-cam-log-id').value : 'all';
+        const dateVal = document.getElementById('filter-cam-log-date') ? document.getElementById('filter-cam-log-date').value : '';
+        let url = `/api/cameras/connection-stats?camera_id=${cid}`;
+        if (dateVal) url += `&date=${dateVal}`;
+
+        const res = await fetch(url);
+        const json = await res.json();
+        if (json.status !== 'ok') return;
+        const data = json.data;
+
+        // KPI 1: Estado de Equipos (online/offline)
+        const liveCams = data.live_cameras || {};
+        let onlineCount = 0;
+        let totalCount = 0;
+        for (const k in liveCams) {
+          totalCount++;
+          if (liveCams[k].connected) onlineCount++;
+        }
+        const statusSummary = document.getElementById('kpi-cam-status-summary');
+        const statusSub = document.getElementById('kpi-cam-status-sub');
+        if (statusSummary) {
+          if (totalCount === 0) {
+            statusSummary.innerHTML = `<span class="text-slate-400">Sin cámaras</span>`;
+          } else if (onlineCount === totalCount) {
+            statusSummary.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span> <span class="text-emerald-400 font-bold">${onlineCount}/${totalCount} En Línea</span>`;
+            if (statusSub) statusSub.textContent = "100% cámaras operando con normalidad";
+          } else {
+            statusSummary.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span> <span class="text-rose-400 font-bold">${onlineCount}/${totalCount} En Línea (${totalCount - onlineCount} caída)</span>`;
+            if (statusSub) statusSub.textContent = "Atención: cámara(s) desconectada(s)";
+          }
+        }
+
+        // KPI 2: Desconexiones hoy
+        const elDisc = document.getElementById('kpi-cam-disconnects');
+        if (elDisc) elDisc.textContent = data.disconnect_count || 0;
+
+        // KPI 3: Tiempo fuera de línea
+        const elDown = document.getElementById('kpi-cam-downtime');
+        if (elDown) {
+          const s = data.total_offline_sec || 0;
+          if (s < 60) elDown.textContent = `${Math.round(s)}s`;
+          else if (s < 3600) elDown.textContent = `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+          else elDown.textContent = `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+        }
+
+        // KPI 4: Uptime %
+        const elUptime = document.getElementById('kpi-cam-uptime');
+        if (elUptime) {
+          const up = data.uptime_percentage ?? 100;
+          elUptime.textContent = `${up.toFixed(1)}%`;
+          elUptime.className = up >= 99 ? "text-sm sm:text-base font-bold text-emerald-400 mt-1" :
+                               up >= 95 ? "text-sm sm:text-base font-bold text-amber-400 mt-1" :
+                                          "text-sm sm:text-base font-bold text-rose-400 mt-1";
+        }
+      } catch (e) {
+        console.error("Error cargando stats de conectividad:", e);
+      }
+    }
+
+    async function loadCameraConnectionLogs(offset = 0) {
+      currentCamLogsOffset = offset;
+      const tbody = document.getElementById('camera-connection-logs-body');
+      if (!tbody) return;
+
+      try {
+        const cid = document.getElementById('filter-cam-log-id') ? document.getElementById('filter-cam-log-id').value : 'all';
+        const evType = document.getElementById('filter-cam-log-event') ? document.getElementById('filter-cam-log-event').value : 'all';
+        const dateVal = document.getElementById('filter-cam-log-date') ? document.getElementById('filter-cam-log-date').value : '';
+
+        let url = `/api/cameras/connection-logs?limit=${CAM_LOGS_LIMIT}&offset=${offset}&camera_id=${cid}&event_type=${evType}`;
+        if (dateVal) url += `&date=${dateVal}`;
+
+        const res = await fetch(url);
+        const json = await res.json();
+        if (json.status !== 'ok') {
+          tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-red-400">Error cargando registros.</td></tr>`;
+          return;
+        }
+
+        const data = json.data;
+        const records = data.records || [];
+        const total = data.total || 0;
+
+        // Paginación UI
+        const infoEl = document.getElementById('cam-logs-pagination-info');
+        const prevBtn = document.getElementById('btn-cam-logs-prev');
+        const nextBtn = document.getElementById('btn-cam-logs-next');
+
+        const fromIdx = total === 0 ? 0 : offset + 1;
+        const toIdx = Math.min(offset + records.length, total);
+        if (infoEl) infoEl.textContent = `Mostrando ${fromIdx} - ${toIdx} de ${total} registros`;
+        if (prevBtn) prevBtn.disabled = (offset === 0);
+        if (nextBtn) nextBtn.disabled = (offset + CAM_LOGS_LIMIT >= total);
+
+        if (records.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="7" class="text-center py-8 text-slate-500">
+                <div class="flex flex-col items-center gap-1.5">
+                  <svg class="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <span>No hay incidentes ni cambios de conexión registrados para los filtros seleccionados.</span>
+                </div>
+              </td>
+            </tr>
+          `;
+          return;
+        }
+
+        tbody.innerHTML = records.map(r => {
+          let badgeEvent = "";
+          if (r.event_type === 'CONNECTED') {
+            badgeEvent = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">🟢 Conectada</span>`;
+          } else if (r.event_type === 'DISCONNECTED') {
+            badgeEvent = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800">🔴 Desconectada</span>`;
+          } else if (r.event_type === 'RECONNECTING') {
+            badgeEvent = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-950 text-amber-400 border border-amber-800">🟡 Reconectando</span>`;
+          } else if (r.event_type === 'DISABLED') {
+            badgeEvent = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">⚪ Pausada</span>`;
+          } else if (r.event_type === 'ENABLED') {
+            badgeEvent = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-950 text-blue-400 border border-blue-800">🔵 Reactivada</span>`;
+          } else {
+            badgeEvent = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-950 text-red-300 border border-red-800">⚠️ ${r.event_type}</span>`;
+          }
+
+          let badgeStatus = r.status === 'ONLINE'
+            ? `<span class="text-emerald-400 font-semibold flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>ONLINE</span>`
+            : r.status === 'OFFLINE'
+            ? `<span class="text-rose-400 font-semibold flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>OFFLINE</span>`
+            : `<span class="text-amber-400 font-semibold flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>${r.status}</span>`;
+
+          let durText = "--";
+          if (r.event_type === 'CONNECTED' && r.duration_offline_sec > 0) {
+            durText = `<span class="text-amber-300 font-medium">Estuvo caída: ${r.duration_offline_formatted}</span>`;
+          } else if (r.event_type === 'DISCONNECTED' && r.duration_online_sec > 0) {
+            durText = `<span class="text-slate-300 font-medium">Sesión duró: ${r.duration_online_formatted}</span>`;
+          } else if (r.duration_offline_sec > 0) {
+            durText = `<span class="text-amber-300">${r.duration_offline_formatted}</span>`;
+          } else if (r.duration_online_sec > 0) {
+            durText = `<span class="text-slate-300">${r.duration_online_formatted}</span>`;
+          }
+
+          return `
+            <tr class="hover:bg-brand-800/40 transition">
+              <td class="py-2.5 px-3 whitespace-nowrap font-mono text-slate-300">${r.timestamp}</td>
+              <td class="py-2.5 px-3 font-semibold text-white">
+                <span class="px-2 py-0.5 rounded bg-brand-800 border border-brand-700 font-mono">${r.camera_id}</span>
+              </td>
+              <td class="py-2.5 px-3 whitespace-nowrap">${badgeEvent}</td>
+              <td class="py-2.5 px-3 whitespace-nowrap">${badgeStatus}</td>
+              <td class="py-2.5 px-3 whitespace-nowrap">${durText}</td>
+              <td class="py-2.5 px-3 font-mono text-slate-400 max-w-[140px] truncate" title="${r.source}">${r.source || '--'}</td>
+              <td class="py-2.5 px-3 text-slate-300 max-w-xs truncate" title="${r.details}">${r.details || '--'}</td>
+            </tr>
+          `;
+        }).join('');
+
+      } catch (e) {
+        console.error("Error cargando log de conexiones:", e);
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-red-400">Error de conexión al cargar bitácora.</td></tr>`;
+      }
+    }
+
+    function prevCamLogsPage() {
+      if (currentCamLogsOffset >= CAM_LOGS_LIMIT) {
+        loadCameraConnectionLogs(currentCamLogsOffset - CAM_LOGS_LIMIT);
+      }
+    }
+
+    function nextCamLogsPage() {
+      loadCameraConnectionLogs(currentCamLogsOffset + CAM_LOGS_LIMIT);
+    }
+
+    function exportCameraLogsCSV() {
+      const cid = document.getElementById('filter-cam-log-id') ? document.getElementById('filter-cam-log-id').value : 'all';
+      const evType = document.getElementById('filter-cam-log-event') ? document.getElementById('filter-cam-log-event').value : 'all';
+      const dateVal = document.getElementById('filter-cam-log-date') ? document.getElementById('filter-cam-log-date').value : '';
+
+      let url = `/api/cameras/connection-logs/export-csv?camera_id=${cid}&event_type=${evType}`;
+      if (dateVal) url += `&date=${dateVal}`;
+      window.open(url, '_blank');
+    }
+
+    function showCameraAlertToast(alert) {
+      const container = document.getElementById('camera-toast-container');
+      if (!container) return;
+
+      const isConn = alert.event_type === 'CONNECTED';
+      const isDisconn = alert.event_type === 'DISCONNECTED';
+      const isReconn = alert.event_type === 'RECONNECTING';
+
+      const bgClass = isConn ? 'bg-emerald-950/95 border-emerald-600 text-emerald-200' :
+                      isDisconn ? 'bg-rose-950/95 border-rose-600 text-rose-200' :
+                      isReconn ? 'bg-amber-950/95 border-amber-600 text-amber-200' :
+                      'bg-brand-900 border-brand-600 text-slate-200';
+
+      const icon = isConn ? `<svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>` :
+                   isDisconn ? `<svg class="w-5 h-5 text-rose-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>` :
+                   `<svg class="w-5 h-5 text-amber-400 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`;
+
+      const toast = document.createElement('div');
+      toast.className = `pointer-events-auto p-3.5 rounded-xl border shadow-xl flex items-start gap-3 transition-all duration-300 transform translate-y-2 opacity-0 ${bgClass}`;
+      toast.innerHTML = `
+        <div class="flex-shrink-0 mt-0.5">${icon}</div>
+        <div class="flex-1 text-xs">
+          <div class="font-bold flex items-center justify-between">
+            <span>[${alert.camera_id}] ${isConn ? 'Cámara Conectada' : isDisconn ? 'Cámara Desconectada' : alert.event_type}</span>
+            <span class="text-[10px] opacity-75 font-mono">${alert.timestamp ? alert.timestamp.split(' ')[1] : ''}</span>
+          </div>
+          <div class="mt-0.5 text-[11px] opacity-90">${alert.details || ''}</div>
+          ${alert.duration_offline_sec > 0 ? `<div class="text-[10px] text-amber-300 mt-1 font-semibold">Estuvo fuera de línea por: ${Math.round(alert.duration_offline_sec)}s</div>` : ''}
+        </div>
+        <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-white text-sm font-bold">&times;</button>
+      `;
+
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.classList.remove('translate-y-2', 'opacity-0');
+      }, 10);
+
+      setTimeout(() => {
+        if (toast.parentElement) {
+          toast.classList.add('opacity-0', 'translate-x-4');
+          setTimeout(() => toast.remove(), 300);
+        }
+      }, 6000);
+    }
+
+    function goToCameraConnectionLogs() {
+      switchTab('settings');
+      setTimeout(() => {
+        const el = document.getElementById('camera-connection-logs-body');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 200);
+    }
+
+    // ── ANALÍTICA HISTÓRICA (CHART.JS) & PANELES ESPECIALIZADOS ────────────
+    function setAnalyticsPanel(mode) {
+      currentAnalyticsPanel = mode;
+
+      const btnVeh = document.getElementById('btn-panel-vehicle');
+      const btnPed = document.getElementById('btn-panel-pedestrian');
+      const btnDual = document.getElementById('btn-panel-dual');
+      const badge = document.getElementById('badge-panel-active');
+      const desc = document.getElementById('desc-panel-active');
+
+      const inactiveClass = "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-slate-400 hover:text-white";
+      if (btnVeh) btnVeh.className = inactiveClass;
+      if (btnPed) btnPed.className = inactiveClass;
+      if (btnDual) btnDual.className = inactiveClass;
+
+      if (mode === 'vehicle') {
+        if (btnVeh) btnVeh.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-blue-600 text-white shadow-sm";
+        if (badge) {
+          badge.className = "text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-blue-900/60 text-blue-300 border border-blue-700/50 tracking-wider";
+          badge.textContent = "Panel Vehicular Especializado";
+        }
+        if (desc) desc.textContent = "Auditoría de flujo vehicular, transporte de carga y comportamiento de flota.";
+      } else if (mode === 'pedestrian') {
+        if (btnPed) btnPed.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-purple-600 text-white shadow-sm";
+        if (badge) {
+          badge.className = "text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-purple-900/60 text-purple-300 border border-purple-700/50 tracking-wider";
+          badge.textContent = "Panel Peatonal Especializado";
+        }
+        if (desc) desc.textContent = "Monitoreo de flujo de transeúntes, aforo peatonal, tiempo de permanencia y atención.";
+      } else if (mode === 'dual') {
+        if (btnDual) btnDual.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-emerald-600 text-white shadow-sm";
+        if (badge) {
+          badge.className = "text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700/50 tracking-wider";
+          badge.textContent = "Panel Comparativo Multimodal";
+        }
+        if (desc) desc.textContent = "Análisis comparativo directo entre tráfico motorizado y flujo peatonal para DOOH y movilidad urbana.";
+      }
+
+      loadAnalyticsData();
+    }
+
     async function loadAnalyticsData() {
       const cam = document.getElementById('filter-analytics-cam').value || 'all';
       let date = document.getElementById('filter-analytics-date').value;
@@ -3107,47 +4104,155 @@
       const days = document.getElementById('filter-days-span').value || 7;
 
       try {
-        const resKpi = await fetch(`/api/history/summary?camera_id=${cam}&date=${date}`);
+        const resKpi = await fetch(`/api/history/summary?camera_id=${cam}&date=${date}&entity_type=all`);
         const dataKpi = (await resKpi.json()).data;
         renderKPIs(dataKpi);
 
-        const resHourly = await fetch(`/api/history/hourly?camera_id=${cam}&date=${date}`);
+        const resHourly = await fetch(`/api/history/hourly?camera_id=${cam}&date=${date}&entity_type=all`);
         const dataHourly = (await resHourly.json()).data;
         renderHourlyChart(dataHourly);
 
-        const resDaily = await fetch(`/api/history/daily?camera_id=${cam}&days=${days}`);
+        const resDaily = await fetch(`/api/history/daily?camera_id=${cam}&days=${days}&entity_type=all`);
         const dataDaily = (await resDaily.json()).data;
         renderDailyChart(dataDaily);
 
-        renderPieChart(dataKpi.vehicle_classes || {});
+        renderPieChart(dataKpi);
       } catch (e) {
         console.error("Error cargando datos analíticos:", e);
       }
     }
 
     function renderKPIs(kpi) {
-      document.getElementById('stat-total-flow').textContent = kpi.total_flow.toLocaleString();
-      document.getElementById('stat-in-count').textContent = `↑ ${kpi.total_in.toLocaleString()} In`;
-      document.getElementById('stat-out-count').textContent = `↓ ${kpi.total_out.toLocaleString()} Out`;
-      document.getElementById('stat-peak-hour').textContent = kpi.peak_hour || '--:--';
-      document.getElementById('stat-avg-dwell').textContent = `${kpi.avg_dwell_seconds} s`;
+      const v = kpi.vehicles || {};
+      const p = kpi.pedestrians || {};
 
-      let heavy = 0;
-      let total = kpi.total_flow || 1;
-      if (kpi.vehicle_classes) {
-        heavy += (kpi.vehicle_classes['Camion'] || 0);
-        heavy += (kpi.vehicle_classes['Autobus'] || 0);
+      const card1Title = document.getElementById('kpi-card1-title');
+      const card1Icon = document.getElementById('kpi-card1-icon');
+      const statTotal = document.getElementById('stat-total-flow');
+      const statIn = document.getElementById('stat-in-count');
+      const statOut = document.getElementById('stat-out-count');
+
+      const statSeenTotal = document.getElementById('stat-seen-total');
+      const statSeenSub = document.getElementById('stat-seen-sub');
+
+      const statRateTotal = document.getElementById('stat-rate-total');
+      const statRateSub = document.getElementById('stat-rate-sub');
+
+      const card2Title = document.getElementById('kpi-card2-title');
+      const card2Sub = document.getElementById('kpi-card2-sub');
+      const statPeak = document.getElementById('stat-peak-hour');
+
+      const card4Title = document.getElementById('kpi-card4-title');
+      const card4Sub = document.getElementById('kpi-card4-sub');
+      const statDwell = document.getElementById('stat-avg-dwell');
+
+      if (currentAnalyticsPanel === 'vehicle') {
+        if (card1Title) card1Title.textContent = "⚡ M2: Cruces Vehiculares";
+        if (card1Icon) card1Icon.textContent = "🚗";
+        statTotal.textContent = (v.total_flow ?? kpi.total_flow ?? 0).toLocaleString();
+        statIn.textContent = `↑ ${(v.total_in ?? kpi.total_in ?? 0).toLocaleString()} In`;
+        statOut.textContent = `↓ ${(v.total_out ?? kpi.total_out ?? 0).toLocaleString()} Out`;
+
+        if (statSeenTotal) statSeenTotal.textContent = (v.seen ?? kpi.total_seen ?? 0).toLocaleString();
+        if (statSeenSub) statSeenSub.textContent = "Vehículos únicos captados en encuadre";
+
+        if (statRateTotal) statRateTotal.textContent = `${v.crossing_rate ?? 0}%`;
+        if (statRateSub) statRateSub.textContent = "de vehículos vistos cruzaron una línea";
+
+        if (card2Title) card2Title.textContent = "Hora Pico Vehicular";
+        if (card2Sub) card2Sub.textContent = "Período de mayor congestión";
+        statPeak.textContent = v.peak_hour || kpi.peak_hour || '--:--';
+
+        if (card4Title) card4Title.textContent = "Permanencia Vehicular";
+        if (card4Sub) card4Sub.textContent = "Tiempo medio en encuadre";
+        statDwell.textContent = `${v.avg_dwell_seconds ?? kpi.avg_dwell_seconds ?? 0.0} s`;
+
+      } else if (currentAnalyticsPanel === 'pedestrian') {
+        if (card1Title) card1Title.textContent = "⚡ M2: Cruces Peatonales";
+        if (card1Icon) card1Icon.textContent = "🚶";
+        statTotal.textContent = (p.total_flow ?? 0).toLocaleString();
+        statIn.textContent = `↑ ${(p.total_in ?? 0).toLocaleString()} In`;
+        statOut.textContent = `↓ ${(p.total_out ?? 0).toLocaleString()} Out`;
+
+        if (statSeenTotal) statSeenTotal.textContent = (p.seen ?? 0).toLocaleString();
+        if (statSeenSub) statSeenSub.textContent = "Personas únicas captadas en encuadre";
+
+        if (statRateTotal) statRateTotal.textContent = `${p.crossing_rate ?? 0}%`;
+        if (statRateSub) statRateSub.textContent = "de personas vistas cruzaron una línea";
+
+        if (card2Title) card2Title.textContent = "Hora Pico Peatonal";
+        if (card2Sub) card2Sub.textContent = "Mayor concurrencia de transeúntes";
+        statPeak.textContent = p.peak_hour || '--:--';
+
+        if (card4Title) card4Title.textContent = "Permanencia Peatonal";
+        if (card4Sub) card4Sub.textContent = "Tiempo frente a pantalla/tótem";
+        statDwell.textContent = `${p.avg_dwell_seconds ?? 0.0} s`;
+
+      } else { // 'dual'
+        if (card1Title) card1Title.textContent = "⚡ M2: Cruces Totales";
+        if (card1Icon) card1Icon.textContent = "🔄";
+        statTotal.textContent = (kpi.total_flow ?? 0).toLocaleString();
+        statIn.textContent = `🚗 ${(v.total_flow ?? 0).toLocaleString()} Veh`;
+        statOut.textContent = `🚶 ${(p.total_flow ?? 0).toLocaleString()} Peat`;
+
+        if (statSeenTotal) statSeenTotal.textContent = (kpi.total_seen ?? 0).toLocaleString();
+        if (statSeenSub) statSeenSub.textContent = `🚗 ${(v.seen ?? 0).toLocaleString()} veh | 🚶 ${(p.seen ?? 0).toLocaleString()} peatones`;
+
+        if (statRateTotal) statRateTotal.textContent = `${kpi.crossing_rate ?? 0}%`;
+        if (statRateSub) statRateSub.textContent = "Tasa global de cruce sobre vistos";
+
+        if (card2Title) card2Title.textContent = "Horas Pico (Veh / Peat)";
+        if (card2Sub) card2Sub.textContent = "Mayor afluencia por modalidad";
+        statPeak.textContent = `${v.peak_hour ? v.peak_hour.split(' ')[0] : '--'} / ${p.peak_hour ? p.peak_hour.split(' ')[0] : '--'}`;
+
+        if (card4Title) card4Title.textContent = "Permanencia General";
+        if (card4Sub) card4Sub.textContent = `Veh: ${v.avg_dwell_seconds ?? 0}s | Peat: ${p.avg_dwell_seconds ?? 0}s`;
+        statDwell.textContent = `${kpi.avg_dwell_seconds ?? 0.0} s`;
       }
-      const pct = Math.round((heavy / total) * 100);
-      document.getElementById('stat-heavy-percent').textContent = `${pct}%`;
-      document.getElementById('stat-heavy-count').textContent = `${heavy} vehículos de carga y pasajeros`;
     }
 
     function renderHourlyChart(hourly) {
       const ctx = document.getElementById('chart-hourly').getContext('2d');
       const labels = hourly.map(h => h.hour);
-      const dataIn = hourly.map(h => h.in);
-      const dataOut = hourly.map(h => h.out);
+
+      const titleEl = document.getElementById('chart1-title');
+      const subEl = document.getElementById('chart1-sub');
+      const leg1El = document.getElementById('chart1-legend-1');
+      const leg2El = document.getElementById('chart1-legend-2');
+
+      let datasets = [];
+
+      if (currentAnalyticsPanel === 'vehicle') {
+        if (titleEl) titleEl.textContent = "Distribución Horaria del Flujo Vehicular (00:00 a 23:00 hrs)";
+        if (subEl) subEl.textContent = "Comparativa de aforo vehicular por hora de entrada vs salida.";
+        if (leg1El) leg1El.textContent = "Vehículos Entrada (IN)";
+        if (leg2El) leg2El.textContent = "Vehículos Salida (OUT)";
+
+        datasets = [
+          { label: 'Vehículos IN', data: hourly.map(h => h.vehicles_in ?? h.in), backgroundColor: '#10b981', borderRadius: 4 },
+          { label: 'Vehículos OUT', data: hourly.map(h => h.vehicles_out ?? h.out), backgroundColor: '#f59e0b', borderRadius: 4 }
+        ];
+      } else if (currentAnalyticsPanel === 'pedestrian') {
+        if (titleEl) titleEl.textContent = "Distribución Horaria del Tránsito Peatonal (00:00 a 23:00 hrs)";
+        if (subEl) subEl.textContent = "Afluencia y conteo de personas transeúntes por hora de paso.";
+        if (leg1El) leg1El.textContent = "Peatones Entrada (IN)";
+        if (leg2El) leg2El.textContent = "Peatones Salida (OUT)";
+
+        datasets = [
+          { label: 'Peatones IN', data: hourly.map(h => h.pedestrians_in ?? 0), backgroundColor: '#a855f7', borderRadius: 4 },
+          { label: 'Peatones OUT', data: hourly.map(h => h.pedestrians_out ?? 0), backgroundColor: '#ec4899', borderRadius: 4 }
+        ];
+      } else { // dual
+        if (titleEl) titleEl.textContent = "Comparativa Horaria Multimodal: Vehículos vs Peatones";
+        if (subEl) subEl.textContent = "Curva de aforo vehicular frente a densidad peatonal a lo largo del día.";
+        if (leg1El) leg1El.textContent = "🚗 Flujo Vehicular Total";
+        if (leg2El) leg2El.textContent = "🚶 Flujo Peatonal Total";
+
+        datasets = [
+          { label: 'Vehículos', data: hourly.map(h => h.vehicles_total ?? 0), backgroundColor: '#3b82f6', borderRadius: 4 },
+          { label: 'Peatones', data: hourly.map(h => h.pedestrians_total ?? 0), backgroundColor: '#a855f7', borderRadius: 4 }
+        ];
+      }
 
       if (chartHourly) chartHourly.destroy();
 
@@ -3155,10 +4260,7 @@
         type: 'bar',
         data: {
           labels: labels,
-          datasets: [
-            { label: 'Entradas (IN)', data: dataIn, backgroundColor: '#10b981', borderRadius: 4 },
-            { label: 'Salidas (OUT)', data: dataOut, backgroundColor: '#f59e0b', borderRadius: 4 }
-          ]
+          datasets: datasets
         },
         options: {
           responsive: true,
@@ -3178,7 +4280,64 @@
     function renderDailyChart(daily) {
       const ctx = document.getElementById('chart-daily').getContext('2d');
       const labels = daily.map(d => d.date);
-      const totals = daily.map(d => d.total);
+
+      const titleEl = document.getElementById('chart2-title');
+      const subEl = document.getElementById('chart2-sub');
+
+      let datasets = [];
+
+      if (currentAnalyticsPanel === 'vehicle') {
+        if (titleEl) titleEl.textContent = "Volumen Histórico Vehicular por Días";
+        if (subEl) subEl.textContent = "Tendencia acumulada del aforo vehicular en los últimos días.";
+        datasets = [{
+          label: 'Volumen Vehicular',
+          data: daily.map(d => d.vehicles_total ?? d.total),
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          fill: true,
+          tension: 0.35,
+          pointBackgroundColor: '#2563eb',
+          pointRadius: 4,
+        }];
+      } else if (currentAnalyticsPanel === 'pedestrian') {
+        if (titleEl) titleEl.textContent = "Volumen Histórico Peatonal por Días";
+        if (subEl) subEl.textContent = "Tendencia de afluencia de transeúntes en los últimos días.";
+        datasets = [{
+          label: 'Aforo Peatonal',
+          data: daily.map(d => d.pedestrians_total ?? 0),
+          borderColor: '#a855f7',
+          backgroundColor: 'rgba(168, 85, 247, 0.15)',
+          fill: true,
+          tension: 0.35,
+          pointBackgroundColor: '#9333ea',
+          pointRadius: 4,
+        }];
+      } else { // dual
+        if (titleEl) titleEl.textContent = "Comparativo Histórico Diario (Vehículos vs Peatones)";
+        if (subEl) subEl.textContent = "Evolución paralela del flujo vehicular y peatonal.";
+        datasets = [
+          {
+            label: '🚗 Vehículos',
+            data: daily.map(d => d.vehicles_total ?? 0),
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59, 130, 246, 0.05)',
+            fill: true,
+            tension: 0.35,
+            pointBackgroundColor: '#2563eb',
+            pointRadius: 4,
+          },
+          {
+            label: '🚶 Peatones',
+            data: daily.map(d => d.pedestrians_total ?? 0),
+            borderColor: '#a855f7',
+            backgroundColor: 'rgba(168, 85, 247, 0.05)',
+            fill: true,
+            tension: 0.35,
+            pointBackgroundColor: '#9333ea',
+            pointRadius: 4,
+          }
+        ];
+      }
 
       if (chartDaily) chartDaily.destroy();
 
@@ -3186,22 +4345,13 @@
         type: 'line',
         data: {
           labels: labels,
-          datasets: [{
-            label: 'Volumen Diario Total',
-            data: totals,
-            borderColor: '#3b82f6',
-            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-            fill: true,
-            tension: 0.35,
-            pointBackgroundColor: '#2563eb',
-            pointRadius: 4,
-          }]
+          datasets: datasets
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { display: false },
+            legend: { display: currentAnalyticsPanel === 'dual', labels: { color: '#cbd5e1', font: { size: 10 } } },
             tooltip: { backgroundColor: '#1e293b', titleColor: '#ffffff', bodyColor: '#cbd5e1', borderColor: '#475569', borderWidth: 1 }
           },
           scales: {
@@ -3212,17 +4362,53 @@
       });
     }
 
-    function renderPieChart(classes) {
+    function renderPieChart(dataKpi) {
       const ctx = document.getElementById('chart-pie').getContext('2d');
-      const labels = Object.keys(classes);
-      const values = Object.values(classes);
+      const titleEl = document.getElementById('chart3-title');
+      const subEl = document.getElementById('chart3-sub');
+
+      let labels = [];
+      let values = [];
+      let colors = [];
+
+      if (currentAnalyticsPanel === 'vehicle') {
+        if (titleEl) titleEl.textContent = "Composición de Flota Vehicular";
+        if (subEl) subEl.textContent = "Distribución por tipo de vehículo motorizado.";
+
+        const classes = dataKpi.vehicles?.classes || dataKpi.vehicle_classes || {};
+        for (const [k, v] of Object.entries(classes)) {
+          if (k !== 'Peaton' && k !== 'Persona') {
+            labels.push(k);
+            values.push(v);
+          }
+        }
+        colors = ['#3b82f6', '#0ea5e9', '#f97316', '#06b6d4', '#84cc16', '#64748b'];
+      } else if (currentAnalyticsPanel === 'pedestrian') {
+        if (titleEl) titleEl.textContent = "Sentido del Tránsito Peatonal";
+        if (subEl) subEl.textContent = "Distribución direccional de transeúntes.";
+
+        const p = dataKpi.pedestrians || {};
+        labels = ['Entrada (IN)', 'Salida (OUT)'];
+        values = [p.total_in || 0, p.total_out || 0];
+        colors = ['#a855f7', '#ec4899'];
+      } else { // dual
+        if (titleEl) titleEl.textContent = "Distribución Modal Global";
+        if (subEl) subEl.textContent = "Proporción entre vehículos y peatones.";
+
+        const vFlow = dataKpi.vehicles?.total_flow ?? 0;
+        const pFlow = dataKpi.pedestrians?.total_flow ?? 0;
+        labels = ['🚗 Vehículos Motorizados', '🚶 Peatones y Transeúntes'];
+        values = [vFlow, pFlow];
+        colors = ['#3b82f6', '#a855f7'];
+      }
+
+      if (labels.length === 0 || values.every(v => v === 0)) {
+        labels = ['Sin registros'];
+        values = [1];
+        colors = ['#334155'];
+      }
 
       if (chartPie) chartPie.destroy();
-
-      if (labels.length === 0) {
-        labels.push('Sin datos');
-        values.push(1);
-      }
 
       chartPie = new Chart(ctx, {
         type: 'doughnut',
@@ -3230,7 +4416,7 @@
           labels: labels,
           datasets: [{
             data: values,
-            backgroundColor: ['#3b82f6', '#a855f7', '#f97316', '#06b6d4', '#84cc16', '#64748b'],
+            backgroundColor: colors,
             borderWidth: 2,
             borderColor: '#0f172a'
           }]
@@ -3250,12 +4436,13 @@
     // ── REGISTRO DE EVENTOS (BITÁCORA) ──────────────────────────────────────
     async function loadEvents(offset = 0) {
       eventsOffset = offset;
-      const cam = document.getElementById('filter-ev-cam').value || 'all';
-      const type = document.getElementById('filter-ev-type').value || 'all';
-      const dir = document.getElementById('filter-ev-dir').value || 'all';
-      const date = document.getElementById('filter-ev-date').value || '';
+      const cam = document.getElementById('filter-ev-cam')?.value || 'all';
+      const entity = document.getElementById('filter-ev-entity')?.value || 'all';
+      const type = document.getElementById('filter-ev-type')?.value || 'all';
+      const dir = document.getElementById('filter-ev-dir')?.value || 'all';
+      const date = document.getElementById('filter-ev-date')?.value || '';
 
-      let url = `/api/history/events?camera_id=${cam}&vehicle_type=${type}&direction=${dir}&limit=${eventsLimit}&offset=${offset}`;
+      let url = `/api/history/events?camera_id=${cam}&entity_type=${entity}&vehicle_type=${type}&direction=${dir}&limit=${eventsLimit}&offset=${offset}`;
       if (date) {
         url += `&start_date=${date}&end_date=${date}`;
       }
@@ -3275,7 +4462,7 @@
     function renderEventsTable(events) {
       const tbody = document.getElementById('events-table-body');
       if (!events || events.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-slate-500">No se encontraron eventos con los filtros seleccionados.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center py-8 text-slate-500">No se encontraron eventos con los filtros seleccionados.</td></tr>';
         return;
       }
 
@@ -3285,12 +4472,21 @@
           ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-900/50 text-emerald-400 border border-emerald-700/50">ENTRADA (IN)</span>`
           : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-900/50 text-amber-400 border border-amber-700/50">SALIDA (OUT)</span>`;
 
+        const isPed = (ev.entity_type === 'PEDESTRIAN' || ev.vehicle_type === 'Peaton' || ev.vehicle_type === 'Persona');
+        const entityBadge = isPed
+          ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-900/60 text-purple-300 border border-purple-700/50">🚶 PEATÓN</span>`
+          : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-900/60 text-blue-300 border border-blue-700/50">🚗 VEHÍCULO</span>`;
+
+        const typeColor = isPed ? 'text-purple-300' : 'text-blue-300';
+
         return `
           <tr class="hover:bg-brand-850/60 transition">
             <td class="py-2.5 px-4 font-mono text-slate-300 text-[11px]">${ev.timestamp}</td>
             <td class="py-2.5 px-4 font-semibold text-white uppercase">${ev.camera_id}</td>
             <td class="py-2.5 px-4 font-mono text-slate-400">#${ev.track_id}</td>
-            <td class="py-2.5 px-4 font-medium text-blue-300">${ev.vehicle_type}</td>
+            <td class="py-2.5 px-4 font-mono text-xs text-blue-300"><span class="px-1.5 py-0.5 rounded bg-brand-950 border border-brand-700/60 text-[10px]">${ev.line_id || 'line_1'}</span></td>
+            <td class="py-2.5 px-4">${entityBadge}</td>
+            <td class="py-2.5 px-4 font-medium ${typeColor}">${ev.vehicle_type}</td>
             <td class="py-2.5 px-4">${dirBadge}</td>
             <td class="py-2.5 px-4 text-slate-400">${ev.dwell_time}s</td>
             <td class="py-2.5 px-4 text-slate-400 font-mono">${Math.round((ev.confidence || 0) * 100)}%</td>
@@ -3318,12 +4514,13 @@
     }
 
     function exportCSV() {
-      const cam = document.getElementById('filter-ev-cam').value || 'all';
-      const type = document.getElementById('filter-ev-type').value || 'all';
-      const dir = document.getElementById('filter-ev-dir').value || 'all';
-      const date = document.getElementById('filter-ev-date').value || '';
+      const cam = document.getElementById('filter-ev-cam')?.value || 'all';
+      const entity = document.getElementById('filter-ev-entity')?.value || 'all';
+      const type = document.getElementById('filter-ev-type')?.value || 'all';
+      const dir = document.getElementById('filter-ev-dir')?.value || 'all';
+      const date = document.getElementById('filter-ev-date')?.value || '';
       
-      let url = `/api/history/export/csv?camera_id=${cam}&vehicle_type=${type}&direction=${dir}`;
+      let url = `/api/history/export/csv?camera_id=${cam}&entity_type=${entity}&vehicle_type=${type}&direction=${dir}`;
       if (date) url += `&start_date=${date}&end_date=${date}`;
       window.location.href = url;
     }
@@ -3396,13 +4593,26 @@
       }
     }
 
-    // ── INICIALIZACIÓN ──────────────────────────────────────────────────────
+    // ── INICIALIZACIÓN Y EVENTOS DE IMPRESIÓN ─────────────────────────────────
+    window.addEventListener('beforeprint', () => {
+      const el = document.getElementById('print-official-date');
+      if (el) {
+        el.innerText = 'Emisión: ' + new Date().toLocaleString('es-MX');
+      }
+    });
+
     window.addEventListener('DOMContentLoaded', async () => {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const camLogDate = document.getElementById('filter-cam-log-date');
+      if (camLogDate) camLogDate.value = todayStr;
+
       await loadLocations();
       await loadClients();
-      loadCameras();
+      await loadCameras();
+      await fetchInitialStats();
       connectWebSocket();
-      document.getElementById('filter-analytics-date').value = new Date().toISOString().split('T')[0];
+      document.getElementById('filter-analytics-date').value = todayStr;
+      loadCameraConnectionStats();
     });
   </script>
 </body>

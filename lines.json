@@ -10,13 +10,65 @@
     ]
   ],
   "cam1": [
-    [
-      50,
-      360
-    ],
-    [
-      1230,
-      360
-    ]
+    {
+      "id": "cam1_veh_lane",
+      "name": "Carril de Autos y Camiones",
+      "target_entity": "VEHICLE",
+      "coords": [
+        [
+          571,
+          277
+        ],
+        [
+          957,
+          266
+        ]
+      ]
+    },
+    {
+      "id": "cam1_sidewalk",
+      "name": "Banqueta Peatonal Derecha",
+      "target_entity": "PEDESTRIAN",
+      "coords": [
+        [
+          651,
+          572
+        ],
+        [
+          1127,
+          375
+        ]
+      ]
+    },
+    {
+      "id": "line_1789400736412",
+      "name": "Carril2",
+      "target_entity": "PEDESTRIAN",
+      "coords": [
+        [
+          716,
+          556
+        ],
+        [
+          557,
+          439
+        ]
+      ]
+    },
+    {
+      "id": "line_1789401236783",
+      "name": "L\u00ednea 4",
+      "target_entity": "VEHICLE",
+      "coords": [
+        [
+          572,
+          244
+        ],
+        [
+          513,
+          402
+        ]
+      ]
+    }
   ]
 }

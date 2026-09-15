@@ -55,29 +55,37 @@ def calculate_campaign_metrics(campaign: dict[str, Any]) -> dict[str, Any]:
     energy_kwh = round((estimated_power_watts * total_screen_time_seconds) / (3600.0 * 1000.0), 2)
     energy_cost_mxn = round(energy_kwh * cost_per_kwh, 2)
 
-    # Consultar aforo vehicular en base de datos durante las horas pautadas
+    # Consultar aforo vehicular y peatonal en base de datos durante las horas pautadas
     with database.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT COUNT(*) as total_vehicles
+            SELECT 
+                SUM(CASE WHEN UPPER(entity_type) = 'VEHICLE' THEN 1 ELSE 0 END) as total_vehicles,
+                SUM(CASE WHEN UPPER(entity_type) = 'PEDESTRIAN' THEN 1 ELSE 0 END) as total_pedestrians,
+                COUNT(*) as total_impressions
             FROM traffic_events
             WHERE date(timestamp) >= ? AND date(timestamp) <= ?
               AND cast(strftime('%H', timestamp) as integer) >= ?
               AND cast(strftime('%H', timestamp) as integer) <= ?
         """, (start_date_str, effective_end.strftime("%Y-%m-%d"), start_hour, end_hour))
         row = cursor.fetchone()
-        vehicles_count = row["total_vehicles"] if row else 0
+        vehicles_count = (row["total_vehicles"] or 0) if row else 0
+        pedestrians_count = (row["total_pedestrians"] or 0) if row else 0
 
     # Si la base de datos local tiene pocos días registrados para campañas pasadas,
     # escalar proporcionalmente para reflejar el aforo proyectado realista
     if days_active > 7 and vehicles_count > 0:
         vehicles_count = int(vehicles_count * (days_active / 7.0))
+        pedestrians_count = int(pedestrians_count * (days_active / 7.0))
     elif vehicles_count == 0:
-        # Estimación base mínima según tráfico promedio (450 veh/hora)
+        # Estimación base mínima según tráfico promedio
         vehicles_count = int(days_active * hours_per_day * 420)
+        pedestrians_count = int(days_active * hours_per_day * 180)
 
-    # Costo por mil impactos (CPM de Energía)
-    cpm_energy = round((energy_cost_mxn / max(vehicles_count, 1)) * 1000.0, 2)
+    total_exposed = vehicles_count + pedestrians_count
+
+    # Costo por mil impactos totales (CPM de Energía)
+    cpm_energy = round((energy_cost_mxn / max(total_exposed, 1)) * 1000.0, 2)
 
     return {
         "campaign_id": campaign["id"],
@@ -93,6 +101,8 @@ def calculate_campaign_metrics(campaign: dict[str, Any]) -> dict[str, Any]:
         "total_spots_aired": total_spots_aired,
         "screen_time_hours": round(total_screen_time_seconds / 3600.0, 1),
         "vehicles_exposed": vehicles_count,
+        "pedestrians_exposed": pedestrians_count,
+        "total_exposed": total_exposed,
         "energy_kwh": energy_kwh,
         "energy_cost_mxn": energy_cost_mxn,
         "cost_per_kwh": cost_per_kwh,
