@@ -2836,12 +2836,13 @@ async def report_print_view(
   <script>
     function triggerPrint() {
       try {
+        window.focus();
         window.print();
       } catch (err) {
         console.error("Error al disparar impresión:", err);
       }
     }
-    {'window.addEventListener("DOMContentLoaded", () => { setTimeout(triggerPrint, 500); });' if autoprint else ''}
+    {'window.addEventListener("load", () => { setTimeout(triggerPrint, 350); });' if autoprint else ''}
   </script>
 </body>
 </html>
