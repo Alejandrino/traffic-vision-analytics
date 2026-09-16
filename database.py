@@ -420,14 +420,41 @@ def get_today_line_counts(camera_id: str) -> dict[str, dict[str, int]]:
                     res[lid]["vehicles_out"] += cnt
         return res
 
-def get_kpis(camera_id: Optional[str] = None, date_str: Optional[str] = None, entity_type: Optional[str] = None, line_id: Optional[str] = None) -> dict[str, Any]:
-    """Obtiene indicadores clave de rendimiento (KPIs) globales y desglosados con Doble Métrica: Vistos en Cámara vs Cruces por Línea."""
-    if date_str is None:
-        date_str = datetime.date.today().strftime("%Y-%m-%d")
+def get_kpis(
+    camera_id: Optional[str] = None,
+    date_str: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    line_id: Optional[str] = None,
+    period: str = "day",
+    month_str: Optional[str] = None,
+    year_str: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Obtiene indicadores clave de rendimiento (KPIs) globales y desglosados con Doble Métrica:
+    Vistos en Cámara vs Cruces por Línea, con soporte para granularidad de tiempo:
+    - period="day": por fecha (date_str, por defecto hoy)
+    - period="month": por mes (month_str ej. '2026-09')
+    - period="year": por año (year_str ej. '2026')
+    """
+    base_where_clauses = []
+    base_params: list[Any] = []
+
+    if period == "month":
+        m_val = month_str or (date_str[:7] if date_str else datetime.date.today().strftime("%Y-%m"))
+        base_where_clauses.append("strftime('%Y-%m', timestamp) = ?")
+        base_params.append(m_val)
+        display_date = m_val
+    elif period == "year":
+        y_val = year_str or (date_str[:4] if date_str else datetime.date.today().strftime("%Y"))
+        base_where_clauses.append("strftime('%Y', timestamp) = ?")
+        base_params.append(y_val)
+        display_date = y_val
+    else:
+        d_val = date_str or datetime.date.today().strftime("%Y-%m-%d")
+        base_where_clauses.append("date(timestamp) = ?")
+        base_params.append(d_val)
+        display_date = d_val
         
-    base_where_clauses = ["date(timestamp) = ?"]
-    base_params: list[Any] = [date_str]
-    
     if camera_id and camera_id != "all":
         base_where_clauses.append("camera_id = ?")
         base_params.append(camera_id)
@@ -447,11 +474,8 @@ def get_kpis(camera_id: Optional[str] = None, date_str: Optional[str] = None, en
     active_where_sql = " AND ".join(active_where_clauses)
 
     # Cláusula para tabla de avistamientos (Métrica 1: Vistos en campo de visión)
-    s_clauses = ["date(timestamp) = ?"]
-    s_params: list[Any] = [date_str]
-    if camera_id and camera_id != "all":
-        s_clauses.append("camera_id = ?")
-        s_params.append(camera_id)
+    s_clauses = list(base_where_clauses)
+    s_params = list(base_params)
     s_sql = " AND ".join(s_clauses)
 
     with get_connection() as conn:
@@ -590,7 +614,8 @@ def get_kpis(camera_id: Optional[str] = None, date_str: Optional[str] = None, en
         tot_crossing_rate = round((total_crossed_tracks / max(final_total_seen, 1)) * 100.0, 1) if final_total_seen > 0 else 0.0
         
         return {
-            "date": date_str,
+            "date": display_date,
+            "period": period,
             "total_seen": final_total_seen,
             "total_crossed": total_crossed_tracks,
             "total_flow": total_flow,
@@ -738,6 +763,107 @@ def get_daily_metrics(camera_id: Optional[str] = None, days: int = 7, entity_typ
             }
             for r in cursor.fetchall()
         ]
+
+def get_period_chart_data(
+    period: str = "day",
+    date_str: Optional[str] = None,
+    month_str: Optional[str] = None,
+    year_str: Optional[str] = None,
+    camera_id: Optional[str] = None
+) -> list[dict[str, Any]]:
+    """
+    Genera los puntos de datos para la gráfica del reporte según el período:
+    - period="day": 24 horas (00:00 a 23:00)
+    - period="month": Días del mes (01 a 31)
+    - period="year": Meses del año (Ene a Dic)
+    """
+    if period == "day":
+        return get_hourly_metrics(camera_id=camera_id, date_str=date_str)
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        if period == "month":
+            m_val = month_str or (date_str[:7] if date_str else datetime.date.today().strftime("%Y-%m"))
+            where_clauses = ["strftime('%Y-%m', timestamp) = ?"]
+            params: list[Any] = [m_val]
+            if camera_id and camera_id != "all":
+                where_clauses.append("camera_id = ?")
+                params.append(camera_id)
+
+            where_sql = " AND ".join(where_clauses)
+            cursor.execute(f"""
+                SELECT 
+                    cast(strftime('%d', timestamp) as integer) as day_num,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN direction = 'IN' THEN 1 ELSE 0 END) as total_in,
+                    SUM(CASE WHEN direction = 'OUT' THEN 1 ELSE 0 END) as total_out,
+                    SUM(CASE WHEN UPPER(entity_type) = 'VEHICLE' THEN 1 ELSE 0 END) as veh_total,
+                    SUM(CASE WHEN UPPER(entity_type) = 'PEDESTRIAN' THEN 1 ELSE 0 END) as ped_total
+                FROM traffic_events
+                WHERE {where_sql}
+                GROUP BY day_num
+                ORDER BY day_num ASC
+            """, params)
+            day_rows = {r["day_num"]: r for r in cursor.fetchall()}
+
+            # Hasta 31 días
+            result = []
+            for d in range(1, 32):
+                r = day_rows.get(d)
+                result.append({
+                    "hour": f"Día {d:02d}",
+                    "label": f"{d:02d}",
+                    "slot_index": d,
+                    "total": r["total"] if r else 0,
+                    "in": r["total_in"] if r else 0,
+                    "out": r["total_out"] if r else 0,
+                    "vehicles_total": (r["veh_total"] or 0) if r else 0,
+                    "pedestrians_total": (r["ped_total"] or 0) if r else 0,
+                })
+            return result
+
+        elif period == "year":
+            y_val = year_str or (date_str[:4] if date_str else datetime.date.today().strftime("%Y"))
+            where_clauses = ["strftime('%Y', timestamp) = ?"]
+            params = [y_val]
+            if camera_id and camera_id != "all":
+                where_clauses.append("camera_id = ?")
+                params.append(camera_id)
+
+            where_sql = " AND ".join(where_clauses)
+            cursor.execute(f"""
+                SELECT 
+                    cast(strftime('%m', timestamp) as integer) as month_num,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN direction = 'IN' THEN 1 ELSE 0 END) as total_in,
+                    SUM(CASE WHEN direction = 'OUT' THEN 1 ELSE 0 END) as total_out,
+                    SUM(CASE WHEN UPPER(entity_type) = 'VEHICLE' THEN 1 ELSE 0 END) as veh_total,
+                    SUM(CASE WHEN UPPER(entity_type) = 'PEDESTRIAN' THEN 1 ELSE 0 END) as ped_total
+                FROM traffic_events
+                WHERE {where_sql}
+                GROUP BY month_num
+                ORDER BY month_num ASC
+            """, params)
+            month_rows = {r["month_num"]: r for r in cursor.fetchall()}
+
+            month_names = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+            result = []
+            for m in range(1, 13):
+                r = month_rows.get(m)
+                result.append({
+                    "hour": month_names[m - 1],
+                    "label": month_names[m - 1],
+                    "slot_index": m,
+                    "total": r["total"] if r else 0,
+                    "in": r["total_in"] if r else 0,
+                    "out": r["total_out"] if r else 0,
+                    "vehicles_total": (r["veh_total"] or 0) if r else 0,
+                    "pedestrians_total": (r["ped_total"] or 0) if r else 0,
+                })
+            return result
+
+    return get_hourly_metrics(camera_id=camera_id, date_str=date_str)
 
 def get_events(
     camera_id: Optional[str] = None,
@@ -1243,13 +1369,14 @@ def add_campaign_video(
 def get_client_campaign_report(
     client_id: str,
     campaign_id: Optional[int] = None,
-    location_id: Optional[str] = None
+    location_id: Optional[str] = None,
+    video_id: Optional[int] = None
 ) -> dict[str, Any]:
     """
     Genera el reporte ejecutivo completo para el cliente organizado por:
     - Campaña
     - Pantalla (ubicación)
-    - Desglose por Videos / Spots
+    - Desglose por Videos / Spots (o un video específico)
     Y presenta los datos limpios de consumo eléctrico de la pantalla (kW, kWh, $ MXN)
     sin exponer nombres técnicos de hardware interno (Shelly, puertos, relés).
     """
@@ -1268,6 +1395,8 @@ def get_client_campaign_report(
         campaigns = [c for c in campaigns if c["id"] == campaign_id]
         
     videos = get_campaign_videos(campaign_id=campaign_id, client_id=c_id, location_id=location_id)
+    if video_id:
+        videos = [v for v in videos if v["id"] == video_id]
     
     # Calcular métricas consolidadas
     total_spots_today = sum(v.get("plays_today", 0) for v in videos)

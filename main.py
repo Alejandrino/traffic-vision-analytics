@@ -2169,13 +2169,17 @@ async def report_print_view(
     client_id: Optional[str] = Query(None, description="ID del cliente"),
     campaign_id: Optional[str] = Query(None, description="ID de la campaña"),
     location_id: Optional[str] = Query("loc_minerva", description="ID de la ubicación"),
-    view_mode: str = Query("client", description="'client' para vista ejecutiva limpia (sin tecnicismos de hardware) o 'admin' para vista técnica")
+    view_mode: str = Query("client", description="'client' para vista ejecutiva limpia o 'admin' para vista técnica"),
+    period: str = Query("day", description="'day' (día), 'month' (mes), 'year' (año) o 'campaign' (por campaña/video)"),
+    date: Optional[str] = Query(None, description="Fecha YYYY-MM-DD para período día"),
+    month: Optional[str] = Query(None, description="Mes YYYY-MM para período mes"),
+    year: Optional[str] = Query(None, description="Año YYYY para período año"),
+    video_id: Optional[str] = Query(None, description="ID específico de video/spot a auditar")
 ) -> HTMLResponse:
     """
     Genera un informe ejecutivo imprimible en formato HTML estilizado con @media print
     para exportar directamente a PDF desde el navegador (Ctrl + P / Imprimir a PDF).
-    En modo cliente ('client') presenta la información enfocada en Campaña, Pantalla, Videos y
-    Consumo Eléctrico de Pantalla, abstrayendo componentes internos de hardware (Shelly/procesadores).
+    Soporta filtrado por Día, Mes, Año o Campaña/Video publicitario.
     """
     # 1. Obtener cliente
     client = None
@@ -2201,23 +2205,75 @@ async def report_print_view(
     }
 
     camp_id_int = int(campaign_id) if (campaign_id and campaign_id.isdigit()) else None
-    client_report = database.get_client_campaign_report(client["id"], campaign_id=camp_id_int, location_id=loc["id"])
+    vid_id_int = int(video_id) if (video_id and video_id.isdigit()) else None
+
+    client_report = database.get_client_campaign_report(
+        client["id"],
+        campaign_id=camp_id_int,
+        location_id=loc["id"],
+        video_id=vid_id_int
+    )
     videos = client_report.get("videos", [])
     rep_summary = client_report.get("summary", {})
     campaigns = client_report.get("campaigns", [])
     campaign_name = campaigns[0]["name"] if campaigns else "Pauta Anual de Marca DOOH"
 
-    # 3. Métricas de tráfico y KPIs
+    # Determinar etiquetas y parámetros de período
     today = datetime.date.today().strftime("%Y-%m-%d")
-    kpis = database.get_kpis(date_str=today)
-    hourly_data = database.get_hourly_metrics(date_str=today)
+    current_month = datetime.date.today().strftime("%Y-%m")
+    current_year = datetime.date.today().strftime("%Y")
+
+    active_date = date or today
+    active_month = month or current_month
+    active_year = year or current_year
+
+    if period == "month":
+        period_title = f"Reporte Mensual — {active_month}"
+        period_label = f"Mes Auditado: {active_month}"
+        chart_title = f"Curva de Flujo Diario ({active_month})"
+        period_kpis = database.get_kpis(period="month", month_str=active_month)
+        chart_data = database.get_period_chart_data(period="month", month_str=active_month)
+    elif period == "year":
+        period_title = f"Reporte Anual — Año {active_year}"
+        period_label = f"Año Auditado: {active_year}"
+        chart_title = f"Curva de Flujo Mensual ({active_year})"
+        period_kpis = database.get_kpis(period="year", year_str=active_year)
+        chart_data = database.get_period_chart_data(period="year", year_str=active_year)
+    elif period == "campaign":
+        video_selected = next((v for v in videos if v["id"] == vid_id_int), None) if vid_id_int else None
+        v_title = f"Spot: {video_selected['title']}" if video_selected else campaign_name
+        period_title = f"Auditoría de Campaña — {v_title}"
+        period_label = f"Campaña / Video: {v_title}"
+        chart_title = "Distribución Horaria de Impactos"
+        period_kpis = database.get_kpis(period="day", date_str=active_date)
+        chart_data = database.get_period_chart_data(period="day", date_str=active_date)
+    else:
+        # Período día (default)
+        period_title = f"Reporte Diario — {active_date}"
+        period_label = f"Fecha Auditada: {active_date}"
+        chart_title = "Curva de Flujo Horario (24 Horas)"
+        period_kpis = database.get_kpis(period="day", date_str=active_date)
+        chart_data = database.get_period_chart_data(period="day", date_str=active_date)
+
+    kpis = period_kpis
+    hourly_data = chart_data
     classes_dict = kpis.get("vehicle_classes", {})
     types_breakdown = [{"type": k, "count": v} for k, v in classes_dict.items()]
 
     # 4. Telemetría de energía de pantalla
     shelly_data = shelly_controller.get_status(loc.get("shelly_ip", "192.168.1.150"))
     power_kw = shelly_data.get("power_kw", 4.2)
-    daily_kwh = round(power_kw * 16.5, 2)
+    
+    # Factor de escala según período para cálculo energético estimado
+    period_days_factor = 1.0
+    if period == "month":
+        period_days_factor = 30.0
+    elif period == "year":
+        period_days_factor = 365.0
+    elif period == "campaign":
+        period_days_factor = 7.0
+
+    daily_kwh = round(power_kw * 16.5 * period_days_factor, 2)
     energy_cost = round(daily_kwh * loc.get("cost_per_kwh", 3.85), 2)
 
     # Cálculos acumulados y doble métrica (Vistos en Cámara vs Cruces por Línea)
@@ -2261,23 +2317,23 @@ async def report_print_view(
         campaign_cost = rep_summary.get("energy_cost_mxn", energy_cost)
         campaign_impressions = rep_summary.get("total_impressions", impressions)
     else:
-        total_spots_today = 180
-        total_spots_camp = 3600
+        total_spots_today = int(180 * period_days_factor)
+        total_spots_camp = int(3600 * period_days_factor)
         campaign_kwh = daily_kwh
         campaign_cost = energy_cost
         campaign_impressions = impressions
 
-    # Generar barras SVG para la gráfica horaria con separación vehicular y peatonal
+    # Generar barras SVG para la gráfica con separación vehicular y peatonal adaptada a días / meses / horas
     chart_bars = ""
     max_count = max([h.get("total", 0) for h in hourly_data], default=10) or 1
     if max_count == 0:
         max_count = 1
-    for h in hourly_data:
-        hr_str = h.get("hour", "00:00")
-        try:
-            hr_num = int(hr_str.split(":")[0])
-        except Exception:
-            hr_num = 0
+
+    total_slots = max(len(hourly_data), 1)
+    bar_width = max(8, min(24, int(600 / total_slots) - 4))
+    
+    for idx, h in enumerate(hourly_data):
+        label_str = h.get("label", h.get("hour", str(idx)))
         tot = h.get("total", 0)
         v_cnt = h.get("vehicles_total", 0)
         p_cnt = h.get("pedestrians_total", 0)
@@ -2291,18 +2347,27 @@ async def report_print_view(
 
         y_veh = 115 - h_veh
         y_ped = y_veh - h_ped
-        x = 35 + (hr_num * 27)
+        
+        spacing = (640 / total_slots)
+        x = int(30 + (idx * spacing))
 
-        veh_bar = f'<rect x="{x}" y="{y_veh}" width="18" height="{h_veh}" fill="#0284c7" rx="2" opacity="0.9"><title>{v_cnt} Vehículos</title></rect>' if h_veh > 0 else ""
-        ped_bar = f'<rect x="{x}" y="{y_ped}" width="18" height="{h_ped}" fill="#10b981" rx="2" opacity="0.9"><title>{p_cnt} Peatones</title></rect>' if h_ped > 0 else ""
-        total_lbl = f'<text x="{x + 9}" y="{max(12, y_ped - 3)}" font-size="7" font-weight="bold" fill="#0f172a" text-anchor="middle">{tot}</text>' if tot > 0 else ""
+        veh_bar = f'<rect x="{x}" y="{y_veh}" width="{bar_width}" height="{h_veh}" fill="#0284c7" rx="2" opacity="0.9"><title>{v_cnt} Vehículos</title></rect>' if h_veh > 0 else ""
+        ped_bar = f'<rect x="{x}" y="{y_ped}" width="{bar_width}" height="{h_ped}" fill="#10b981" rx="2" opacity="0.9"><title>{p_cnt} Peatones</title></rect>' if h_ped > 0 else ""
+        total_lbl = f'<text x="{x + (bar_width // 2)}" y="{max(12, y_ped - 3)}" font-size="7" font-weight="bold" fill="#0f172a" text-anchor="middle">{tot}</text>' if tot > 0 else ""
+
+        # Mostrar etiquetas de eje X (cada 2 si son más de 15 slots)
+        show_x_label = True
+        if total_slots > 15 and idx % 2 != 0:
+            show_x_label = False
+
+        x_text = f'<text x="{x + (bar_width // 2)}" y="132" font-size="8" fill="#64748b" text-anchor="middle">{label_str}</text>' if show_x_label else ""
 
         chart_bars += f"""
         <g>
           {veh_bar}
           {ped_bar}
           {total_lbl}
-          <text x="{x + 9}" y="132" font-size="8" fill="#64748b" text-anchor="middle">{hr_num:02d}</text>
+          {x_text}
         </g>
         """
 
@@ -2623,14 +2688,19 @@ async def report_print_view(
   <!-- Barra de control en pantalla (Oculta al imprimir) -->
   <div class="no-print">
     <div>
-      <strong style="color: #38bdf8; font-size: 14px;">Vista Previa de Reporte Ejecutivo DOOH</strong>
+      <strong style="color: #38bdf8; font-size: 14px;">Vista Previa de Reporte Ejecutivo DOOH ({period_title})</strong>
       <span style="color: #94a3b8; font-size: 12px; margin-left: 8px;">Listo para imprimir o exportar a PDF</span>
     </div>
-    <div style="display: flex; gap: 8px; align-items: center;">
-      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode=client" class="btn" style="background: {'#0284c7' if is_client_mode else '#334155'};">Vista Cliente (Pauta & Pantalla)</a>
-      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode=admin" class="btn" style="background: {'#0284c7' if not is_client_mode else '#334155'};">Vista Administrador (Hardware)</a>
-      <button onclick="window.print()" class="btn" style="background: #10b981;">Imprimir / Guardar PDF</button>
-      <button onclick="window.close()" class="btn" style="background: #475569;">Cerrar</button>
+    <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode={view_mode}&period=day&date={active_date}" class="btn" style="background: {'#0284c7' if period == 'day' else '#334155'}; font-size: 11px; padding: 4px 8px;">Día</a>
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode={view_mode}&period=month&month={active_month}" class="btn" style="background: {'#0284c7' if period == 'month' else '#334155'}; font-size: 11px; padding: 4px 8px;">Mes</a>
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode={view_mode}&period=year&year={active_year}" class="btn" style="background: {'#0284c7' if period == 'year' else '#334155'}; font-size: 11px; padding: 4px 8px;">Año</a>
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode={view_mode}&period=campaign{f'&campaign_id={camp_id_int}' if camp_id_int else ''}{f'&video_id={vid_id_int}' if vid_id_int else ''}" class="btn" style="background: {'#0284c7' if period == 'campaign' else '#334155'}; font-size: 11px; padding: 4px 8px;">Campaña / Video</a>
+      <span style="color: #64748b; margin: 0 4px;">|</span>
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode=client&period={period}&date={active_date}&month={active_month}&year={active_year}" class="btn" style="background: {'#059669' if is_client_mode else '#475569'}; font-size: 11px; padding: 4px 8px;">Vista Cliente</a>
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode=admin&period={period}&date={active_date}&month={active_month}&year={active_year}" class="btn" style="background: {'#059669' if not is_client_mode else '#475569'}; font-size: 11px; padding: 4px 8px;">Vista Admin</a>
+      <button onclick="window.print()" class="btn" style="background: #b45309; font-weight: bold; font-size: 11px; padding: 4px 10px;">🖨️ Imprimir / Guardar PDF</button>
+      <button onclick="window.close()" class="btn" style="background: #475569; font-size: 11px; padding: 4px 8px;">Cerrar</button>
     </div>
   </div>
 
@@ -2642,7 +2712,7 @@ async def report_print_view(
           <img src="{client_logo}" alt="{client.get('name')}" style="max-height: 48px; max-width: 180px; object-fit: contain;" onerror="this.style.display='none'" />
           <div>
             <h1 style="font-size: 16px; margin: 0; color: #0f172a; font-weight: 800;">{client.get('name')}</h1>
-            <p style="margin: 2px 0 0 0; font-size: 11px; color: #64748b;">Reporte de Aforo Vehicular, Audiencia e Impactos DOOH</p>
+            <p style="margin: 2px 0 0 0; font-size: 11px; color: #64748b;">Reporte de Aforo Vehicular, Audiencia e Impactos DOOH ({period_title})</p>
           </div>
         </div>
       </td>
@@ -2656,7 +2726,7 @@ async def report_print_view(
             <div style="width: 28px; height: 28px; background: #0284c7; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 15px;">A</div>
           </div>
           <div style="margin-top: 4px; font-size: 10px; color: #475569;">
-            Fecha: <strong>{today}</strong> | Pantalla: <strong>{loc.get('name')}</strong>
+            <strong>{period_label}</strong> | Pantalla: <strong>{loc.get('name')}</strong>
           </div>
         </div>
       </td>
@@ -2721,7 +2791,7 @@ async def report_print_view(
   <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 14px; margin-bottom: 14px; page-break-inside: avoid; break-inside: avoid;">
     <div>
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-        <div class="section-title" style="margin: 0;">Curva de Flujo Horario (24 Horas)</div>
+        <div class="section-title" style="margin: 0;">{chart_title}</div>
         <div style="display: flex; gap: 12px; font-size: 10px; font-weight: 700;">
           <span style="display: flex; align-items: center; gap: 4px; color: #0284c7;">
             <span style="width: 9px; height: 9px; background: #0284c7; border-radius: 2px; display: inline-block;"></span>
