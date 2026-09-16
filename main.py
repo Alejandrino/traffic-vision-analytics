@@ -2174,7 +2174,8 @@ async def report_print_view(
     date: Optional[str] = Query(None, description="Fecha YYYY-MM-DD para período día"),
     month: Optional[str] = Query(None, description="Mes YYYY-MM para período mes"),
     year: Optional[str] = Query(None, description="Año YYYY para período año"),
-    video_id: Optional[str] = Query(None, description="ID específico de video/spot a auditar")
+    video_id: Optional[str] = Query(None, description="ID específico de video/spot a auditar"),
+    autoprint: bool = Query(False, description="Disparar automáticamente el diálogo de impresión al cargar")
 ) -> HTMLResponse:
     """
     Genera un informe ejecutivo imprimible en formato HTML estilizado con @media print
@@ -2832,6 +2833,16 @@ async def report_print_view(
     </p>
   </div>
 
+  <script>
+    function triggerPrint() {
+      try {
+        window.print();
+      } catch (err) {
+        console.error("Error al disparar impresión:", err);
+      }
+    }
+    {'window.addEventListener("DOMContentLoaded", () => { setTimeout(triggerPrint, 500); });' if autoprint else ''}
+  </script>
 </body>
 </html>
 """
