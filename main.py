@@ -1982,15 +1982,51 @@ class ClientCreate(BaseModel):
     name: str
     contact_email: Optional[str] = ""
     logo_url: Optional[str] = ""
+    kwh_rate_cfe: Optional[float] = 3.85
     location_ids: Optional[list[str]] = []
 
 @app.post("/api/clients", summary="Registrar o actualizar cliente")
 async def api_post_client(req: ClientCreate) -> JSONResponse:
-    cid = database.add_client(req.id, req.name, req.contact_email or "", req.logo_url or "")
+    cid = database.add_client(
+        req.id, 
+        req.name, 
+        req.contact_email or "", 
+        req.logo_url or "",
+        float(req.kwh_rate_cfe or 3.85)
+    )
     if req.location_ids:
         for loc in req.location_ids:
             database.assign_client_location(cid, loc)
     return JSONResponse({"status": "ok", "client_id": cid, "message": "Cliente guardado exitosamente."})
+
+
+class ClientKwhRateUpdate(BaseModel):
+    kwh_rate: float
+    location_id: Optional[str] = None
+
+@app.post("/api/client/{client_id}/kwh-rate", summary="Actualizar tarifa de CFE por kWh para un cliente")
+async def api_update_client_kwh_rate(client_id: str, req: ClientKwhRateUpdate) -> JSONResponse:
+    """
+    Permite al cliente o administrador fijar la tarifa real que le factura CFE ($/kWh).
+    Impacta inmediatamente en los costos reales de la pantalla y reportes ejecutivos.
+    """
+    client = database.get_client(client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Cliente '{client_id}' no encontrado.")
+    
+    if req.kwh_rate <= 0:
+        raise HTTPException(status_code=400, detail="La tarifa por kWh debe ser un valor numérico positivo mayor a 0.")
+    
+    database.update_client_kwh_rate(client_id, req.kwh_rate, req.location_id)
+    logger.info(f"[CFE-RATE] Tarifa CFE actualizada para cliente '{client_id}': ${req.kwh_rate:.2f} MXN/kWh (loc: {req.location_id or 'global'})")
+    return JSONResponse({
+        "status": "ok", 
+        "client_id": client_id, 
+        "kwh_rate": req.kwh_rate,
+        "location_id": req.location_id,
+        "message": f"Tarifa de CFE actualizada a ${req.kwh_rate:.2f} MXN/kWh correctamente."
+    })
+
 
 
 @app.post("/api/client/{client_id}/logo", summary="Subir logotipo corporativo del cliente")
@@ -2175,12 +2211,14 @@ async def report_print_view(
     month: Optional[str] = Query(None, description="Mes YYYY-MM para período mes"),
     year: Optional[str] = Query(None, description="Año YYYY para período año"),
     video_id: Optional[str] = Query(None, description="ID específico de video/spot a auditar"),
+    kwh_rate: Optional[float] = Query(None, description="Tarifa CFE $/kWh personalizada o auditada"),
     autoprint: bool = Query(False, description="Disparar automáticamente el diálogo de impresión al cargar")
 ) -> HTMLResponse:
     """
     Genera un informe ejecutivo imprimible en formato HTML estilizado con @media print
     para exportar directamente a PDF desde el navegador (Ctrl + P / Imprimir a PDF).
-    Soporta filtrado por Día, Mes, Año o Campaña/Video publicitario.
+    Soporta filtrado por Día, Mes, Año o Campaña/Video publicitario, calculando el
+    costo real de energía con la tarifa contratada con CFE.
     """
     # 1. Obtener cliente
     client = None
@@ -2192,7 +2230,8 @@ async def report_print_view(
             "id": "cli_cerveceria",
             "name": "Cervecería Cuauhtémoc Moctezuma",
             "logo_url": "/static/uploads/logos/default_cerveceria.svg",
-            "contact_email": "marketing@cerveceria.com.mx"
+            "contact_email": "marketing@cerveceria.com.mx",
+            "kwh_rate_cfe": 3.85
         }
 
     # 2. Obtener ubicación y reporte de cliente consolidado
@@ -2204,6 +2243,9 @@ async def report_print_view(
         "cost_per_kwh": 3.85,
         "shelly_ip": "192.168.1.150"
     }
+
+    # Tarifa CFE efectiva (prioridad: query param > cliente > ubicación > default 3.85)
+    effective_cfe_rate = float(kwh_rate) if (kwh_rate and kwh_rate > 0) else float(client.get("kwh_rate_cfe") or loc.get("cost_per_kwh") or 3.85)
 
     camp_id_int = int(campaign_id) if (campaign_id and campaign_id.isdigit()) else None
     vid_id_int = int(video_id) if (video_id and video_id.isdigit()) else None
@@ -2275,7 +2317,7 @@ async def report_print_view(
         period_days_factor = 7.0
 
     daily_kwh = round(power_kw * 16.5 * period_days_factor, 2)
-    energy_cost = round(daily_kwh * loc.get("cost_per_kwh", 3.85), 2)
+    energy_cost = round(daily_kwh * effective_cfe_rate, 2)
 
     # Cálculos acumulados y doble métrica (Vistos en Cámara vs Cruces por Línea)
     veh_kpis = kpis.get("vehicles", {})
@@ -2380,7 +2422,7 @@ async def report_print_view(
         p_total = v.get("total_plays", 0)
         v_impr = v.get("total_impressions", 0)
         v_kwh = v.get("kwh_consumed", 0.0)
-        v_cost = round(v_kwh * loc.get("cost_per_kwh", 3.85), 2)
+        v_cost = round(v_kwh * effective_cfe_rate, 2)
         video_rows += f"""
         <tr style="border-bottom: 1px solid #e2e8f0;">
           <td style="padding: 8px 10px;">
@@ -2392,7 +2434,7 @@ async def report_print_view(
           <td style="padding: 8px 10px; text-align: right; color: #0284c7; font-weight: 700;">{p_today:,}</td>
           <td style="padding: 8px 10px; text-align: right; font-weight: 800; color: #0f172a;">{p_total:,}</td>
           <td style="padding: 8px 10px; text-align: right; color: #059669; font-weight: 700;">{v_impr:,}</td>
-          <td style="padding: 8px 10px; text-align: right; font-weight: 600; color: #1e293b;">{v_kwh} kWh <span style="font-size: 10px; color: #64748b;">(${v_cost:,.2f})</span></td>
+          <td style="padding: 8px 10px; text-align: right; font-weight: 600; color: #1e293b;">{v_kwh} kWh <span style="font-size: 10px; color: #059669; font-weight: 700;">(${v_cost:,.2f})</span></td>
         </tr>
         """
     if not video_rows:
@@ -2469,8 +2511,9 @@ async def report_print_view(
           </tbody>
         </table>
         """
+        campaign_cost_actual = round(campaign_kwh * effective_cfe_rate, 2)
         seccion_energia = f"""
-        <div class="section-title">Consumo Eléctrico de la Pantalla LED</div>
+        <div class="section-title">Consumo Eléctrico de la Pantalla LED (Tarifa CFE: ${effective_cfe_rate:.2f} MXN/kWh)</div>
         <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 12px 16px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; font-size: 11px;">
           <div>
             <span style="color: #166534; font-weight: bold; display: block;">Potencia Activa Pantalla:</span>
@@ -2481,16 +2524,16 @@ async def report_print_view(
             <span style="font-size: 16px; font-weight: 800; color: #15803d;">{campaign_kwh} kWh</span>
           </div>
           <div>
-            <span style="color: #166534; font-weight: bold; display: block;">Costo Eléctrico Asignado:</span>
-            <span style="font-size: 16px; font-weight: 800; color: #15803d;">${campaign_cost:,.2f} MXN</span>
+            <span style="color: #166534; font-weight: bold; display: block;">Costo Eléctrico Real (CFE):</span>
+            <span style="font-size: 16px; font-weight: 800; color: #15803d;">${campaign_cost_actual:,.2f} MXN</span>
           </div>
           <div>
-            <span style="color: #166534; font-weight: bold; display: block;">Regulación Lumínica Solar:</span>
-            <span style="font-size: 13px; font-weight: 800; color: #0284c7;">Calibrado Autónomo</span>
+            <span style="color: #166534; font-weight: bold; display: block;">Tarifa CFE Auditada:</span>
+            <span style="font-size: 14px; font-weight: 800; color: #0284c7;">${effective_cfe_rate:.2f} / kWh</span>
           </div>
         </div>
         <div style="font-size: 10px; color: #64748b; margin-top: 4px; font-style: italic;">
-          * Medición directa de telemetría de pantalla conforme a los horarios de transmisión y tarifa eléctrica asignada ({loc.get('cost_per_kwh', 3.85)} $/kWh).
+          * Medición directa de telemetría de pantalla conforme a los horarios de transmisión y tarifa eléctrica real CFE configurada por el cliente (${effective_cfe_rate:.2f} MXN/kWh).
         </div>
         """
     else:
@@ -2691,15 +2734,18 @@ async def report_print_view(
     <div>
       <strong style="color: #38bdf8; font-size: 14px;">Vista Previa de Reporte Ejecutivo DOOH ({period_title})</strong>
       <span style="color: #94a3b8; font-size: 12px; margin-left: 8px;">Listo para imprimir o exportar a PDF</span>
+      <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.4); margin-left: 8px;">
+        ⚡ Tarifa CFE: ${effective_cfe_rate:.2f} MXN/kWh
+      </span>
     </div>
     <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode={view_mode}&period=day&date={active_date}" class="btn" style="background: {'#0284c7' if period == 'day' else '#334155'}; font-size: 11px; padding: 4px 8px;">Día</a>
-      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode={view_mode}&period=month&month={active_month}" class="btn" style="background: {'#0284c7' if period == 'month' else '#334155'}; font-size: 11px; padding: 4px 8px;">Mes</a>
-      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode={view_mode}&period=year&year={active_year}" class="btn" style="background: {'#0284c7' if period == 'year' else '#334155'}; font-size: 11px; padding: 4px 8px;">Año</a>
-      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode={view_mode}&period=campaign{f'&campaign_id={camp_id_int}' if camp_id_int else ''}{f'&video_id={vid_id_int}' if vid_id_int else ''}" class="btn" style="background: {'#0284c7' if period == 'campaign' else '#334155'}; font-size: 11px; padding: 4px 8px;">Campaña / Video</a>
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode={view_mode}&period=day&date={active_date}&kwh_rate={effective_cfe_rate}" class="btn" style="background: {'#0284c7' if period == 'day' else '#334155'}; font-size: 11px; padding: 4px 8px;">Día</a>
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode={view_mode}&period=month&month={active_month}&kwh_rate={effective_cfe_rate}" class="btn" style="background: {'#0284c7' if period == 'month' else '#334155'}; font-size: 11px; padding: 4px 8px;">Mes</a>
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode={view_mode}&period=year&year={active_year}&kwh_rate={effective_cfe_rate}" class="btn" style="background: {'#0284c7' if period == 'year' else '#334155'}; font-size: 11px; padding: 4px 8px;">Año</a>
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode={view_mode}&period=campaign{f'&campaign_id={camp_id_int}' if camp_id_int else ''}{f'&video_id={vid_id_int}' if vid_id_int else ''}&kwh_rate={effective_cfe_rate}" class="btn" style="background: {'#0284c7' if period == 'campaign' else '#334155'}; font-size: 11px; padding: 4px 8px;">Campaña / Video</a>
       <span style="color: #64748b; margin: 0 4px;">|</span>
-      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode=client&period={period}&date={active_date}&month={active_month}&year={active_year}" class="btn" style="background: {'#059669' if is_client_mode else '#475569'}; font-size: 11px; padding: 4px 8px;">Vista Cliente</a>
-      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode=admin&period={period}&date={active_date}&month={active_month}&year={active_year}" class="btn" style="background: {'#059669' if not is_client_mode else '#475569'}; font-size: 11px; padding: 4px 8px;">Vista Admin</a>
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode=client&period={period}&date={active_date}&month={active_month}&year={active_year}&kwh_rate={effective_cfe_rate}" class="btn" style="background: {'#059669' if is_client_mode else '#475569'}; font-size: 11px; padding: 4px 8px;">Vista Cliente</a>
+      <a href="/report/print?client_id={client.get('id')}&location_id={loc.get('id')}&view_mode=admin&period={period}&date={active_date}&month={active_month}&year={active_year}&kwh_rate={effective_cfe_rate}" class="btn" style="background: {'#059669' if not is_client_mode else '#475569'}; font-size: 11px; padding: 4px 8px;">Vista Admin</a>
       <button onclick="window.print()" class="btn" style="background: #b45309; font-weight: bold; font-size: 11px; padding: 4px 10px;">🖨️ Imprimir / Guardar PDF</button>
       <button onclick="window.close()" class="btn" style="background: #475569; font-size: 11px; padding: 4px 8px;">Cerrar</button>
     </div>
@@ -2834,14 +2880,14 @@ async def report_print_view(
   </div>
 
   <script>
-    function triggerPrint() {
-      try {
+    function triggerPrint() {{
+      try {{
         window.focus();
         window.print();
-      } catch (err) {
+      }} catch (err) {{
         console.error("Error al disparar impresión:", err);
-      }
-    }
+      }}
+    }}
     {'window.addEventListener("load", () => { setTimeout(triggerPrint, 350); });' if autoprint else ''}
   </script>
 </body>

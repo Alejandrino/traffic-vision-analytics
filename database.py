@@ -183,20 +183,34 @@ def init_db() -> None:
                 name TEXT NOT NULL,
                 contact_email TEXT,
                 logo_url TEXT,
+                kwh_rate_cfe REAL DEFAULT 3.85,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # Migración dinámica de columna kwh_rate_cfe en clients
+        cursor.execute("PRAGMA table_info(clients)")
+        client_cols = [r["name"] for r in cursor.fetchall()]
+        if "kwh_rate_cfe" not in client_cols:
+            cursor.execute("ALTER TABLE clients ADD COLUMN kwh_rate_cfe REAL DEFAULT 3.85")
 
         # ── TABLA DE ASOCIACIÓN CLIENTE ↔ PANTALLAS / UBICACIONES ────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS client_locations (
                 client_id TEXT NOT NULL,
                 location_id TEXT NOT NULL,
+                custom_kwh_rate REAL DEFAULT NULL,
                 PRIMARY KEY (client_id, location_id),
                 FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
                 FOREIGN KEY (location_id) REFERENCES locations(id) ON DELETE CASCADE
             )
         """)
+
+        # Migración dinámica de custom_kwh_rate en client_locations
+        cursor.execute("PRAGMA table_info(client_locations)")
+        cl_cols = [r["name"] for r in cursor.fetchall()]
+        if "custom_kwh_rate" not in cl_cols:
+            cursor.execute("ALTER TABLE client_locations ADD COLUMN custom_kwh_rate REAL DEFAULT NULL")
 
         # ── TABLA DE CONTROLADORES Y DISPOSITIVOS (TB40 / VX600 PRO / SHELLY) ──
         cursor.execute("""
@@ -1407,14 +1421,17 @@ def get_client_campaign_report(
 
     # Consumo eléctrico de la pantalla
     total_kwh = round(sum(v.get("kwh_consumed", 0.0) for v in videos), 2)
-    avg_kwh_cost = 3.85
+    client_cfe_rate = float(client.get("kwh_rate_cfe") or 3.85)
+    avg_kwh_cost = client_cfe_rate
     if screens:
-        avg_kwh_cost = sum(s.get("cost_per_kwh", 3.85) for s in screens) / len(screens)
+        avg_kwh_cost = sum(float(s.get("cost_per_kwh", client_cfe_rate)) for s in screens) / len(screens)
     energy_cost_mxn = round(total_kwh * avg_kwh_cost, 2)
     
-    # Calcular costo para cada video individual
+    # Calcular costo para cada video individual usando tarifa CFE real
     for v in videos:
-        v["cost_mxn"] = round(float(v.get("kwh_consumed", 0.0)) * avg_kwh_cost, 2)
+        v_rate = float(v.get("cost_per_kwh") or avg_kwh_cost)
+        v["cost_mxn"] = round(float(v.get("kwh_consumed", 0.0)) * v_rate, 2)
+        v["effective_kwh_rate"] = v_rate
 
     # Potencia de pantalla estimada
     screen_area_total = sum(s.get("screen_area_m2", 32.0) for s in screens) or 32.0
@@ -1531,16 +1548,46 @@ def get_client(client_id: str) -> Optional[dict[str, Any]]:
         c["locations"] = [dict(loc) for loc in cursor.fetchall()]
         return c
 
-def add_client(client_id: str, name: str, contact_email: str = "", logo_url: str = "") -> str:
-    """Registra o actualiza un cliente comercial."""
+def add_client(client_id: str, name: str, contact_email: str = "", logo_url: str = "", kwh_rate_cfe: float = 3.85) -> str:
+    """Registra o actualiza un cliente comercial junto con su tarifa CFE por kWh."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO clients (id, name, contact_email, logo_url)
-            VALUES (?, ?, ?, ?)
-        """, (client_id, name, contact_email, logo_url))
+            INSERT INTO clients (id, name, contact_email, logo_url, kwh_rate_cfe)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                contact_email = excluded.contact_email,
+                logo_url = CASE WHEN excluded.logo_url != '' THEN excluded.logo_url ELSE clients.logo_url END,
+                kwh_rate_cfe = CASE WHEN excluded.kwh_rate_cfe > 0 THEN excluded.kwh_rate_cfe ELSE clients.kwh_rate_cfe END
+        """, (client_id, name, contact_email, logo_url, kwh_rate_cfe))
         conn.commit()
         return client_id
+
+def update_client_kwh_rate(client_id: str, kwh_rate_cfe: float, location_id: Optional[str] = None) -> bool:
+    """
+    Actualiza la tarifa de energía que CFE le cobra al cliente.
+    Si se especifica location_id, actualiza la tarifa específica para esa pantalla en client_locations.
+    En caso contrario o adicionalmente, actualiza la tarifa base global del cliente.
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        if location_id and location_id != "all":
+            cursor.execute("""
+                UPDATE client_locations SET custom_kwh_rate = ?
+                WHERE client_id = ? AND location_id = ?
+            """, (kwh_rate_cfe, client_id, location_id))
+            # Si no existe la asociación, se crea
+            if cursor.rowcount == 0:
+                cursor.execute("""
+                    INSERT INTO client_locations (client_id, location_id, custom_kwh_rate)
+                    VALUES (?, ?, ?)
+                """, (client_id, location_id, kwh_rate_cfe))
+
+        # Actualizar también tarifa base en la ficha del cliente
+        cursor.execute("UPDATE clients SET kwh_rate_cfe = ? WHERE id = ?", (kwh_rate_cfe, client_id))
+        conn.commit()
+        return True
 
 def update_client_logo(client_id: str, logo_url: str) -> bool:
     """Actualiza la URL o ruta del logotipo del cliente."""
@@ -1550,24 +1597,29 @@ def update_client_logo(client_id: str, logo_url: str) -> bool:
         conn.commit()
         return cursor.rowcount > 0
 
-def assign_client_location(client_id: str, location_id: str) -> bool:
-    """Asocia una pantalla/ubicación a un cliente."""
+def assign_client_location(client_id: str, location_id: str, custom_kwh_rate: Optional[float] = None) -> bool:
+    """Asocia una pantalla/ubicación a un cliente con tarifa opcional personalizada."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR IGNORE INTO client_locations (client_id, location_id)
-            VALUES (?, ?)
-        """, (client_id, location_id))
+            INSERT OR REPLACE INTO client_locations (client_id, location_id, custom_kwh_rate)
+            VALUES (?, ?, ?)
+        """, (client_id, location_id, custom_kwh_rate))
         conn.commit()
         return True
 
 def get_client_screens(client_id: str) -> list[dict[str, Any]]:
-    """Devuelve las ubicaciones y pantallas autorizadas para un cliente."""
+    """Devuelve las ubicaciones y pantallas autorizadas para un cliente con la tarifa real CFE aplicada."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT l.* FROM locations l
+            SELECT l.*, 
+                   COALESCE(cl.custom_kwh_rate, c.kwh_rate_cfe, l.cost_per_kwh, 3.85) as cost_per_kwh,
+                   COALESCE(cl.custom_kwh_rate, c.kwh_rate_cfe, l.cost_per_kwh, 3.85) as effective_kwh_rate,
+                   c.kwh_rate_cfe as client_cfe_rate
+            FROM locations l
             JOIN client_locations cl ON l.id = cl.location_id
+            JOIN clients c ON cl.client_id = c.id
             WHERE cl.client_id = ? AND l.is_active = 1
             ORDER BY l.name ASC
         """, (client_id,))
