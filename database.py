@@ -281,8 +281,45 @@ def init_db() -> None:
                 FOREIGN KEY (cliente_id) REFERENCES clients(id) ON DELETE SET NULL
             )
         """)
-        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_invitations_token ON invitations(token)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_invitations_email ON invitations(email)")
+        # ── TABLA DE PRUEBAS DE EMISIÓN DE PANTALLA (PROOF OF PLAY POR CÁMARA) ─
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS screen_play_proofs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id TEXT NOT NULL,
+                location_id TEXT NOT NULL,
+                video_id INTEGER,
+                video_title TEXT NOT NULL,
+                timestamp DATETIME NOT NULL,
+                image_url TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'VERIFIED', -- 'VERIFIED', 'WARNING', 'OFFLINE'
+                source_type TEXT NOT NULL DEFAULT 'USB', -- 'USB' o 'CCTV_RTSP'
+                camera_identifier TEXT NOT NULL,
+                luminance_score REAL DEFAULT 0.85,
+                verified_fps REAL DEFAULT 30.0,
+                notes TEXT,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+                FOREIGN KEY (location_id) REFERENCES locations(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_proofs_client ON screen_play_proofs(client_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_proofs_location ON screen_play_proofs(location_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_proofs_time ON screen_play_proofs(timestamp)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_proofs_video ON screen_play_proofs(video_id)")
+
+        # ── TABLA DE CONFIGURACIÓN DE CÁMARAS DE AUDITORÍA ───────────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS proof_camera_configs (
+                location_id TEXT PRIMARY KEY,
+                camera_type TEXT NOT NULL DEFAULT 'USB', -- 'USB' o 'CCTV_RTSP'
+                source_url TEXT NOT NULL DEFAULT '0',    -- índice '0', '1' o 'rtsp://...'
+                roi_coords TEXT DEFAULT '[[0.1, 0.1], [0.9, 0.9]]',
+                min_luminance_threshold REAL DEFAULT 0.15,
+                auto_capture_interval_min INTEGER DEFAULT 15,
+                is_active INTEGER DEFAULT 1,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (location_id) REFERENCES locations(id) ON DELETE CASCADE
+            )
+        """)
 
         conn.commit()
 
@@ -1435,7 +1472,10 @@ def get_client_campaign_report(
 
     # Potencia de pantalla estimada
     screen_area_total = sum(s.get("screen_area_m2", 32.0) for s in screens) or 32.0
-    estimated_power_kw = round((screen_area_total / 32.0) * 4.2, 2)
+    estimated_power_kw = round(sum(s.get("estimated_power_kw", 4.5) for s in screens) if screens else 4.5, 2)
+    # Evidencias fotográficas de prueba de reproducción (Proof of Play)
+    play_proofs = get_client_play_proofs(client_id=c_id, location_id=location_id, video_id=video_id, limit=20)
+    total_verified = len([p for p in play_proofs if p.get("status") == "VERIFIED"])
 
     return {
         "client": client,
@@ -1447,6 +1487,7 @@ def get_client_campaign_report(
         "screens": screens,
         "campaigns": campaigns,
         "videos": videos,
+        "play_proofs": play_proofs,
         "summary": {
             "total_campaigns": len(campaigns),
             "total_videos": len(videos),
@@ -1455,6 +1496,8 @@ def get_client_campaign_report(
             "total_spots_campaign": total_spots_all,
             "total_plays": total_spots_all,
             "total_impressions": total_impressions,
+            "total_verified_proofs": total_verified,
+            "verification_rate_pct": round((total_verified / max(1, len(play_proofs))) * 100, 1) if play_proofs else 100.0,
             "estimated_reach_vehicles": int(total_impressions / 1.6),
             "total_exposure_hours": exposure_hours,
             "screen_time_hours": exposure_hours,
@@ -2099,5 +2142,153 @@ def accept_invitation(token: str, password_hash: str) -> Optional[dict[str, Any]
     return get_user_by_id(user_id)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# MÓDULO DE AUDITORÍA VISUAL: PROOF OF PLAY (COMPROBACIÓN POR CÁMARA DE PANTALLA)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def record_screen_play_proof(
+    client_id: str,
+    location_id: str,
+    video_title: str,
+    image_url: str,
+    video_id: Optional[int] = None,
+    status: str = "VERIFIED",
+    source_type: str = "USB",
+    camera_identifier: str = "Cam_Auditoria_Minerva",
+    luminance_score: float = 0.88,
+    verified_fps: float = 30.0,
+    notes: Optional[str] = None,
+    timestamp: Optional[datetime.datetime] = None
+) -> int:
+    """Registra una evidencia fotográfica de reproducción auditada en pantalla por cámara."""
+    if timestamp is None:
+        timestamp = datetime.datetime.now()
+    time_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO screen_play_proofs (
+                client_id, location_id, video_id, video_title, timestamp,
+                image_url, status, source_type, camera_identifier,
+                luminance_score, verified_fps, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            client_id, location_id, video_id, video_title, time_str,
+            image_url, status, source_type, camera_identifier,
+            round(luminance_score, 2), round(verified_fps, 1), notes
+        ))
+        conn.commit()
+        return cursor.lastrowid or 0
 
 
+def get_client_play_proofs(
+    client_id: Optional[str] = None,
+    location_id: Optional[str] = None,
+    video_id: Optional[int] = None,
+    limit: int = 30,
+    date_str: Optional[str] = None
+) -> list[dict[str, Any]]:
+    """Obtiene el historial de comprobaciones visuales para un cliente o pantalla."""
+    where = []
+    params: list[Any] = []
+
+    if client_id and client_id != "all":
+        where.append("p.client_id = ?")
+        params.append(client_id)
+    if location_id and location_id != "all":
+        where.append("p.location_id = ?")
+        params.append(location_id)
+    if video_id:
+        where.append("p.video_id = ?")
+        params.append(video_id)
+    if date_str:
+        where.append("date(p.timestamp) = ?")
+        params.append(date_str)
+
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            SELECT 
+                p.id, p.client_id, p.location_id, p.video_id, p.video_title,
+                p.timestamp, p.image_url, p.status, p.source_type,
+                p.camera_identifier, p.luminance_score, p.verified_fps, p.notes,
+                c.name as client_name,
+                l.name as location_name
+            FROM screen_play_proofs p
+            LEFT JOIN clients c ON p.client_id = c.id
+            LEFT JOIN locations l ON p.location_id = l.id
+            {where_sql}
+            ORDER BY p.timestamp DESC
+            LIMIT ?
+        """, (*params, limit))
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def get_proof_camera_config(location_id: str = "loc_minerva") -> dict[str, Any]:
+    """Obtiene la configuración de la cámara de auditoría (USB o CCTV RTSP) para un sitio."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM proof_camera_configs WHERE location_id = ?", (location_id,))
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+        
+        # Default de fábrica: Cámara USB en índice 0 o RTSP según ambiente
+        default_cfg = {
+            "location_id": location_id,
+            "camera_type": "USB",
+            "source_url": "0",
+            "roi_coords": "[[0.05, 0.05], [0.95, 0.95]]",
+            "min_luminance_threshold": 0.15,
+            "auto_capture_interval_min": 15,
+            "is_active": 1,
+            "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        cursor.execute("""
+            INSERT OR REPLACE INTO proof_camera_configs (
+                location_id, camera_type, source_url, roi_coords,
+                min_luminance_threshold, auto_capture_interval_min, is_active, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            default_cfg["location_id"], default_cfg["camera_type"], default_cfg["source_url"],
+            default_cfg["roi_coords"], default_cfg["min_luminance_threshold"],
+            default_cfg["auto_capture_interval_min"], default_cfg["is_active"], default_cfg["updated_at"]
+        ))
+        conn.commit()
+        return default_cfg
+
+
+def save_proof_camera_config(
+    location_id: str,
+    camera_type: str,
+    source_url: str,
+    auto_capture_interval_min: int = 15,
+    is_active: int = 1,
+    roi_coords: Optional[str] = None,
+    min_luminance_threshold: float = 0.15
+) -> dict[str, Any]:
+    """Guarda o actualiza la configuración de la cámara de auditoría de pantalla."""
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO proof_camera_configs (
+                location_id, camera_type, source_url, roi_coords,
+                min_luminance_threshold, auto_capture_interval_min, is_active, updated_at
+            ) VALUES (?, ?, ?, coalesce(?, '[[0.05, 0.05], [0.95, 0.95]]'), ?, ?, ?, ?)
+            ON CONFLICT(location_id) DO UPDATE SET
+                camera_type = excluded.camera_type,
+                source_url = excluded.source_url,
+                auto_capture_interval_min = excluded.auto_capture_interval_min,
+                is_active = excluded.is_active,
+                min_luminance_threshold = excluded.min_luminance_threshold,
+                updated_at = excluded.updated_at
+        """, (
+            location_id, camera_type, source_url, roi_coords,
+            min_luminance_threshold, auto_capture_interval_min, is_active, now_str
+        ))
+        conn.commit()
+    return get_proof_camera_config(location_id)

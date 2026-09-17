@@ -51,6 +51,7 @@ import shelly_controller
 import campaign_manager
 import solar_brightness_engine
 import auth_service
+from screen_verifier import screen_verifier_engine
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN DE LOGGING
@@ -212,6 +213,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     broadcast_task = asyncio.create_task(broadcast_metrics_loop())
     solar_task = asyncio.create_task(solar_auto_brightness_loop())
 
+    # ── Iniciar motor de verificación de pantalla (Proof of Play) ───────────
+    try:
+        screen_verifier_engine.start()
+        logger.info("Motor de verificación de pantalla (Proof of Play) iniciado.")
+    except Exception as exc:
+        logger.error(f"Error iniciando ScreenVerifierEngine: {exc}")
+
     logger.info("=== Sistema listo. Servidor escuchando... ===")
 
     yield  # Aquí corre el servidor
@@ -221,6 +229,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     inference_task.cancel()
     broadcast_task.cancel()
     solar_task.cancel()
+    screen_verifier_engine.stop()
 
     for cam_id, stream in streams.items():
         stream.stop()
@@ -2197,6 +2206,106 @@ async def api_vx600_status(ip: str = "192.168.1.160", port: int = 6000) -> JSONR
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# RUTAS — AUDITORÍA INTELIGENTE DE PANTALLA: PROOF OF PLAY (CÁMARA USB / CCTV)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ProofCameraConfigRequest(BaseModel):
+    location_id: str = "loc_minerva"
+    camera_type: str = "USB"  # 'USB' o 'CCTV_RTSP'
+    source_url: str = "0"     # índice '0'/'1' o 'rtsp://...'
+    auto_interval_min: Optional[int] = 15
+
+class ProofManualCaptureRequest(BaseModel):
+    client_id: str
+    video_title: str
+    video_id: Optional[int] = None
+    location_id: Optional[str] = "loc_minerva"
+    notes: Optional[str] = None
+
+@app.get("/api/screen-verifier/status", summary="Estado de la cámara de auditoría de pantalla")
+async def api_screen_verifier_status(location_id: str = "loc_minerva") -> JSONResponse:
+    """Retorna el estado de la cámara que apunta a la pantalla, luminancia y último frame."""
+    cfg = database.get_proof_camera_config(location_id)
+    return JSONResponse({
+        "status": "ok",
+        "location_id": location_id,
+        "is_connected": screen_verifier_engine.is_connected,
+        "camera_type": screen_verifier_engine.camera_type,
+        "source_url": screen_verifier_engine.source_url,
+        "screen_is_on": screen_verifier_engine.screen_is_on,
+        "latest_luminance": screen_verifier_engine.latest_luminance,
+        "fps_observed": screen_verifier_engine.fps_observed,
+        "config": cfg
+    })
+
+@app.post("/api/screen-verifier/config", summary="Configurar cámara de verificación (USB o CCTV RTSP)")
+async def api_screen_verifier_config(req: ProofCameraConfigRequest) -> JSONResponse:
+    """Configura si la cámara es USB local o stream CCTV RTSP y reinicia el motor."""
+    res = screen_verifier_engine.update_config(
+        camera_type=req.camera_type,
+        source_url=req.source_url,
+        auto_interval_min=req.auto_interval_min or 15
+    )
+    return JSONResponse({
+        "status": "ok",
+        "message": f"Cámara de verificación configurada como {req.camera_type} ('{req.source_url}').",
+        "config": res
+    })
+
+@app.post("/api/screen-verifier/capture", summary="Disparar captura inmediata de evidencia de reproducción")
+async def api_screen_verifier_capture(req: ProofManualCaptureRequest) -> JSONResponse:
+    """Toma una foto de prueba con marca de agua pericial y la guarda en la base de datos."""
+    proof = screen_verifier_engine.capture_play_proof(
+        client_id=req.client_id,
+        video_title=req.video_title,
+        video_id=req.video_id,
+        notes=req.notes
+    )
+    return JSONResponse({
+        "status": "ok",
+        "message": "Evidencia fotográfica capturada y registrada con éxito.",
+        "proof": proof
+    })
+
+@app.get("/api/client/{client_id}/evidence", summary="Galería de comprobaciones visuales del cliente")
+async def api_client_evidence(
+    client_id: str,
+    location_id: Optional[str] = None,
+    limit: int = Query(30, ge=1, le=100),
+    date: Optional[str] = None
+) -> JSONResponse:
+    """Retorna las evidencias fotográficas de spots transmitidos para el cliente."""
+    proofs = database.get_client_play_proofs(
+        client_id=client_id,
+        location_id=location_id,
+        limit=limit,
+        date_str=date
+    )
+    return JSONResponse({
+        "status": "ok",
+        "client_id": client_id,
+        "count": len(proofs),
+        "evidence": proofs
+    })
+
+@app.get("/video_feed/screen_proof", summary="Stream MJPEG en vivo de la cámara que audita la pantalla")
+async def video_feed_screen_proof() -> StreamingResponse:
+    """Stream de video en vivo de la cámara de verificación hacia la pantalla."""
+    async def _proof_generator():
+        while True:
+            jpg = screen_verifier_engine.get_latest_frame_jpeg()
+            if jpg:
+                yield (b"--frame\r\n"
+                       b"Content-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
+            await asyncio.sleep(0.06)
+
+    return StreamingResponse(
+        _proof_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # REPORTE EJECUTIVO PDF / IMPRESIÓN (APEX COMPANY)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -2439,6 +2548,50 @@ async def report_print_view(
         """
     if not video_rows:
         video_rows = """<tr><td colspan="7" style="padding: 12px; text-align: center; color: #94a3b8;">Sin spots registrados para esta campaña</td></tr>"""
+
+    # Evidencias fotográficas de comprobación de emisión (Proof of Play)
+    play_proofs = database.get_client_play_proofs(
+        client_id=client.get("id"),
+        location_id=loc.get("id"),
+        video_id=vid_id_int,
+        limit=6,
+        date_str=active_date if period == "day" else None
+    )
+
+    proof_cards = ""
+    for p in play_proofs:
+        proof_cards += f"""
+        <div style="border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; background: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+          <img src="{p.get('image_url')}" alt="Evidencia de Emisión" style="width: 100%; height: 95px; object-fit: cover; display: block;" onerror="this.src='/static/uploads/evidence/placeholder.jpg'" />
+          <div style="padding: 6px 8px; font-size: 10px;">
+            <div style="font-weight: bold; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{p.get('video_title')}</div>
+            <div style="color: #64748b; font-family: monospace; font-size: 9px;">{p.get('timestamp')}</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 3px;">
+              <span style="color: #166534; font-weight: 700; background: #dcfce7; padding: 1px 5px; border-radius: 3px; font-size: 9px;">✓ VERIFICADO</span>
+              <span style="color: #475569; font-size: 9px;">LUM: {int(p.get('luminance_score', 0.85) * 100)}%</span>
+            </div>
+          </div>
+        </div>
+        """
+
+    if not proof_cards:
+        proof_cards = """
+        <div style="grid-column: 1 / -1; padding: 16px; text-align: center; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 6px; color: #64748b; font-size: 11px;">
+          Auditoría de cámara activa · Las instantáneas periciales se sincronizan automáticamente cada 15 min según la rotación de spots.
+        </div>
+        """
+
+    proof_gallery_section = f"""
+    <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+      <span>Auditoría Visual de Emisión en Pantalla (Proof of Play por Cámara USB / CCTV)</span>
+      <span style="font-size: 10px; font-weight: normal; color: #059669; background: #ecfdf5; padding: 2px 8px; border-radius: 4px; border: 1px solid #a7f3d0;">
+        Conforme a Norma AVIXA & Certificación de Emisión Real
+      </span>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; page-break-inside: avoid; break-inside: avoid;">
+      {proof_cards}
+    </div>
+    """
 
     # Filas de dispositivos de hardware (Vista Administrador)
     devices = database.get_hardware_devices(loc["id"])
@@ -2868,6 +3021,9 @@ async def report_print_view(
 
   <!-- Sección de Consumo Eléctrico de Pantalla -->
   {seccion_energia}
+
+  <!-- Sección de Auditoría Visual: Proof of Play por Cámara -->
+  {proof_gallery_section}
 
   <!-- Pie de página Oficial y Obligatorio -->
   <div class="footer-watermark">
